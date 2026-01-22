@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db.models import Q
@@ -14,7 +14,6 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        # Filtros básicos
         search = self.request.query_params.get('search', None)
         if search:
             queryset = queryset.filter(
@@ -37,23 +36,36 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         if not justification:
             return Response({"justification": "Este campo es requerido"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Añadimos el voluntario a los datos del serializador
         data = request.data.copy()
         data['volunteer'] = volunteer.id
+        
+        # Mapeo de seguridad
+        if 'study_id' in data:
+            data['study'] = data.pop('study_id')
 
         serializer = ParticipationSerializer(data=data)
         if serializer.is_valid():
             participation = serializer.save()
             
-            # Crear Log
+            # --- MEJORA AQUÍ: Log limpio y en español ---
             AuditLog.objects.create(
                 user=user,
                 action='CREATE',
                 model_affected='Participation',
-                record_id=f"{volunteer.code} -> Estudio {participation.study.name}",
-                changes=serializer.data,
+                record_id=f"{volunteer.code}",
+                # En lugar de guardar todo el objeto, guardamos lo importante:
+                changes={
+                    'Acción': 'Asignación de Estudio',
+                    'Estudio Asignado': participation.study.name,
+                    'Voluntario': volunteer.full_name
+                },
                 justification=justification
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ParticipationViewSet(viewsets.ModelViewSet):
+    queryset = Participation.objects.all()
+    serializer_class = ParticipationSerializer
+    permission_classes = [IsAdminOrReadOnly]

@@ -1,26 +1,28 @@
 from django.contrib import admin
 from django.urls import path, include
-from auditing.views import AuditLogViewSet
-from users.views import UserViewSet
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
 from rest_framework.routers import DefaultRouter
-router = DefaultRouter()
-router.register(r'logs', AuditLogViewSet)
-router.register(r'users', UserViewSet)
+from rest_framework_simplejwt.views import TokenRefreshView
 
+# Importamos las vistas necesarias
+from users.views import MyTokenObtainPairView, UserViewSet
+from auditing.views import AuditLogViewSet
+
+# Router para el panel de administración
+admin_router = DefaultRouter()
+admin_router.register(r'users', UserViewSet)
+admin_router.register(r'logs', AuditLogViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     
-    # Autenticación JWT
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'), # Login
+    # Autenticación
+    path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
-    # Apps
-    path('api/volunteers/', include('volunteers.urls')), # Asumiendo que crearás urls.py en volunteers
-    path('api/studies/', include('studies.urls')), 
-    path('api/admin/', include(router.urls)),
+    path('api/', include('volunteers.urls')), 
+    
+    path('api/studies/', include('studies.urls')),
+    
+    # Rutas de Administración
+    path('api/admin/', include(admin_router.urls)), 
 ]
