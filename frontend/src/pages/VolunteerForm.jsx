@@ -1,37 +1,41 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useEffect, useContext } from "react";
 import api from "../api/axios";
 import { useForm } from "react-hook-form";
 import ParticipationManager from "../components/ParticipationManager";
-import { Calendar } from "lucide-react";
+import { Calendar, Lock } from "lucide-react";
+import { AuthContext } from "../context/AuthContext";
+import SearchableSelect from "../components/SearchableSelect";
 
-const VolunteerForm = () => {
-  const { id } = useParams(); // Si hay ID, es edición
-  const navigate = useNavigate();
-  const isEditing = !!id;
+const VolunteerForm = ({
+  idToEdit,
+  onClose,
+  onSuccess,
+  readOnlyMode = false,
+  onParticipationChange,
+}) => {
+  const { user } = useContext(AuthContext);
+  const isEditing = !!idToEdit;
+  const isReadOnly = isEditing && (!user?.isAdmin || readOnlyMode);
 
-  // React Hook Form
   const {
     register,
     handleSubmit,
     setValue,
+    watch,
     formState: { errors },
   } = useForm();
+
   const [serverError, setServerError] = useState("");
   const [participations, setParticipations] = useState([]);
-
-  // Nuevo estado para la lista de estudios (Dropdown de registro inicial)
   const [studies, setStudies] = useState([]);
 
-  // 1. Cargar datos del voluntario (Si es edición)
   useEffect(() => {
     if (isEditing) {
       loadVolunteerData();
     } else {
-      // Si es nuevo registro, cargamos estudios vigentes para el dropdown
       loadStudies();
     }
-  }, [id, isEditing, setValue]);
+  }, [idToEdit]);
 
   const loadStudies = async () => {
     try {
@@ -44,244 +48,220 @@ const VolunteerForm = () => {
 
   const loadVolunteerData = () => {
     api
-      .get(`volunteers/${id}/`)
+      .get(`volunteers/${idToEdit}/`)
       .then((res) => {
         const data = res.data;
         setValue("first_name", data.first_name);
+        // ... (resto de setValues igual que antes)
         setValue("middle_name", data.middle_name);
         setValue("last_name_paternal", data.last_name_paternal);
         setValue("last_name_maternal", data.last_name_maternal);
         setValue("sex", data.sex);
         setValue("phone", data.phone);
         setValue("curp", data.curp);
+
         setParticipations(data.participations || []);
       })
       .catch((err) => {
-        console.error(err);
         setServerError("No se pudo cargar el voluntario.");
       });
   };
 
   const onSubmit = async (data) => {
+    if (isReadOnly) return;
     setServerError("");
-
-    // 1. LIMPIEZA DE DATOS (ESTA ES LA CORRECCIÓN)
-    // Creamos una copia para no modificar el original del form
     const payload = { ...data };
-
-    // Si initial_study_id es una cadena vacía (no seleccionó nada), lo eliminamos del envío
     if (!payload.initial_study_id) {
       delete payload.initial_study_id;
-      delete payload.initial_admission_date; // También la fecha si no hay estudio
+      delete payload.initial_admission_date;
     }
-
     try {
       if (isEditing) {
-        await api.put(`volunteers/${id}/`, payload);
+        await api.put(`volunteers/${idToEdit}/`, payload);
       } else {
         await api.post("volunteers/", payload);
       }
-      navigate("/voluntarios");
+      if (onSuccess) onSuccess();
     } catch (error) {
       if (error.response && error.response.data) {
-        const msg =
-          typeof error.response.data === "string"
-            ? error.response.data
-            : JSON.stringify(error.response.data);
-        setServerError(msg);
+        setServerError(JSON.stringify(error.response.data));
       } else {
         setServerError("Ocurrió un error inesperado.");
       }
     }
   };
 
-  return (
-    <div className="max-w-4xl mx-auto">
-      <div className="bg-white rounded shadow-lg p-8">
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">
-          {isEditing ? "Editar Voluntario" : "Registrar Nuevo Voluntario"}
-        </h2>
+  const selectedStudyId = watch("initial_study_id");
 
-        {serverError && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 break-words">
-            <p>{serverError}</p>
+  return (
+    <div className="h-full flex flex-col">
+      {isReadOnly && (
+        <div className="mb-4 flex items-center text-gray-500 bg-gray-100 px-3 py-2 rounded-lg text-sm font-medium border border-gray-200">
+          <Lock size={16} className="mr-2" /> Estás viendo este registro en modo
+          lectura.
+        </div>
+      )}
+
+      {serverError && (
+        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 break-words">
+          <p>{serverError}</p>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Primer Nombre
+            </label>
+            <input
+              {...register("first_name", { required: !isReadOnly })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Segundo Nombre
+            </label>
+            <input
+              {...register("middle_name")}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Apellido Paterno
+            </label>
+            <input
+              {...register("last_name_paternal", { required: !isReadOnly })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Apellido Materno
+            </label>
+            <input
+              {...register("last_name_maternal", { required: !isReadOnly })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Sexo
+            </label>
+            <select
+              {...register("sex", { required: !isReadOnly })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            >
+              <option value="M">Masculino</option>
+              <option value="F">Femenino</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Teléfono
+            </label>
+            <input
+              {...register("phone", { required: !isReadOnly })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700">
+              CURP
+            </label>
+            <input
+              {...register("curp", {
+                required: !isReadOnly,
+                maxLength: 18,
+                minLength: 18,
+              })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded uppercase disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+        </div>
+
+        {!isEditing && (
+          <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 mt-6">
+            <h3 className="font-bold text-blue-800 mb-4 flex items-center">
+              <Calendar className="mr-2" /> Asignación Inicial (Opcional)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <SearchableSelect
+                  label="Estudio Vigente"
+                  placeholder="Buscar estudio..."
+                  options={studies}
+                  value={selectedStudyId}
+                  onChange={(val) => setValue("initial_study_id", val)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  F. Internamiento
+                </label>
+                <input
+                  type="date"
+                  {...register("initial_admission_date")}
+                  className="mt-1 block w-full p-2 border border-blue-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Nombres */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Primer Nombre
-              </label>
-              <input
-                {...register("first_name", { required: true })}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded"
-              />
-              {errors.first_name && (
-                <span className="text-red-500 text-xs">Requerido</span>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Segundo Nombre (Opcional)
-              </label>
-              <input
-                {...register("middle_name")}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded"
-              />
-            </div>
-
-            {/* Apellidos */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Apellido Paterno
-              </label>
-              <input
-                {...register("last_name_paternal", { required: true })}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Apellido Materno
-              </label>
-              <input
-                {...register("last_name_maternal", { required: true })}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded"
-              />
-            </div>
-
-            {/* Datos Demográficos */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Sexo
-              </label>
-              <select
-                {...register("sex", { required: true })}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded"
-              >
-                <option value="M">Masculino</option>
-                <option value="F">Femenino</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Teléfono
-              </label>
-              <input
-                {...register("phone", { required: true })}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700">
-                CURP
-              </label>
-              <input
-                {...register("curp", {
-                  required: true,
-                  maxLength: 18,
-                  minLength: 18,
-                })}
-                className="mt-1 block w-full p-2 border border-gray-300 rounded uppercase"
-              />
-              {errors.curp && (
-                <span className="text-red-500 text-xs">
-                  Debe tener 18 caracteres
-                </span>
-              )}
-            </div>
+        {isEditing && !isReadOnly && (
+          <div className="bg-yellow-50 p-4 rounded border border-yellow-200 mt-6">
+            <label className="block text-sm font-bold text-yellow-800 mb-2">
+              Justificación del Cambio
+            </label>
+            <textarea
+              {...register("justification", { required: true })}
+              placeholder="Motivo..."
+              className="w-full p-2 border border-yellow-300 rounded h-20 focus:ring-yellow-500 focus:border-yellow-500"
+            ></textarea>
           </div>
+        )}
 
-          {/* SECCIÓN NUEVA: Asignación Inicial (Solo para nuevos registros) */}
-          {!isEditing && (
-            <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 mt-6 animate-fade-in">
-              <h3 className="font-bold text-blue-800 mb-4 flex items-center">
-                <Calendar className="mr-2" /> Asignación Inicial (Opcional)
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Estudio Vigente
-                  </label>
-                  <select
-                    {...register("initial_study_id")}
-                    className="mt-1 block w-full p-2 border border-blue-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">-- Ninguno (Solo registro) --</option>
-                    {studies.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Fecha de Internamiento
-                  </label>
-                  <input
-                    type="date"
-                    {...register("initial_admission_date")}
-                    className="mt-1 block w-full p-2 border border-blue-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-blue-600 mt-2">
-                * Si seleccionas un estudio, el voluntario quedará inscrito
-                automáticamente al guardarse.
-              </p>
-            </div>
-          )}
-
-          {/* Área de Justificación: Solo visible al editar */}
-          {isEditing && (
-            <div className="bg-yellow-50 p-4 rounded border border-yellow-200 mt-6">
-              <label className="block text-sm font-bold text-yellow-800 mb-2">
-                Justificación del Cambio (Auditable)
-              </label>
-              <textarea
-                {...register("justification", { required: isEditing })}
-                placeholder="Describa por qué está modificando este registro..."
-                className="w-full p-2 border border-yellow-300 rounded h-24 focus:ring-yellow-500 focus:border-yellow-500"
-              ></textarea>
-              {errors.justification && (
-                <span className="text-red-500 text-xs font-bold">
-                  La justificación es obligatoria para guardar cambios.
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={() => navigate("/voluntarios")}
-              className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
+        <div className="flex justify-end space-x-3 pt-4 border-t mt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
+          >
+            {isReadOnly ? "Cerrar" : "Cancelar"}
+          </button>
+          {!isReadOnly && (
             <button
               type="submit"
               className="px-6 py-2 bg-primary text-white rounded hover:bg-blue-800 font-medium"
             >
-              {isEditing ? "Guardar Cambios" : "Registrar Voluntario"}
+              {isEditing ? "Guardar Cambios" : "Registrar"}
             </button>
-          </div>
-        </form>
+          )}
+        </div>
+      </form>
 
-        {/* Sección de Participaciones (Solo visible al Editar) */}
-        {isEditing && (
+      {isEditing && (
+        <div className="mt-6">
           <ParticipationManager
-            volunteerId={id}
+            volunteerId={idToEdit}
             participations={participations}
             onUpdate={loadVolunteerData}
+            readOnly={isReadOnly}
+            // NUEVO: Pasamos la notificación al manager
+            onExternalUpdate={onParticipationChange}
           />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

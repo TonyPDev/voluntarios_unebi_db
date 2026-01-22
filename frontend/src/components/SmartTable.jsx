@@ -1,35 +1,89 @@
-import { useState, useMemo } from "react";
-import { ChevronDown, Eye, Search } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { ChevronDown, Eye, Search, Filter, X } from "lucide-react";
 
 const SmartTable = ({ data = [], columns = [], title, actions }) => {
-  // Inicializar columnas visibles
   const [visibleColumns, setVisibleColumns] = useState(
     columns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}),
   );
   const [search, setSearch] = useState("");
   const [showColumnSelector, setShowColumnSelector] = useState(false);
 
-  // Filtrado de datos
-  const filteredData = useMemo(() => {
-    if (!search) return data;
-    const lowerSearch = search.toLowerCase();
-    return data.filter((item) => {
-      // Buscamos en los valores directos del objeto
-      return Object.values(item).some((val) =>
-        String(val).toLowerCase().includes(lowerSearch),
-      );
+  const [columnFilters, setColumnFilters] = useState({});
+  const [activeFilterDropdown, setActiveFilterDropdown] = useState(null);
+
+  // NUEVO: Estado para el buscador interno del filtro
+  const [filterSearchTerm, setFilterSearchTerm] = useState("");
+
+  const filterRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (filterRef.current && !filterRef.current.contains(event.target)) {
+        setActiveFilterDropdown(null);
+        setFilterSearchTerm(""); // Limpiar búsqueda al cerrar
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleFilterChange = (columnKey, value) => {
+    setColumnFilters((prev) => {
+      const currentFilters = prev[columnKey] || [];
+      const newFilters = currentFilters.includes(value)
+        ? currentFilters.filter((f) => f !== value)
+        : [...currentFilters, value];
+
+      if (newFilters.length === 0) {
+        const { [columnKey]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [columnKey]: newFilters };
     });
-  }, [data, search]);
+  };
+
+  const filteredData = useMemo(() => {
+    let result = Array.isArray(data) ? data : [];
+
+    // 1. Filtrado por Columnas
+    Object.entries(columnFilters).forEach(([key, selectedValues]) => {
+      if (selectedValues.length > 0) {
+        result = result.filter((item) => {
+          const itemValue = item[key];
+          if (Array.isArray(itemValue)) {
+            return itemValue.some((val) => selectedValues.includes(val));
+          }
+          return selectedValues.includes(itemValue);
+        });
+      }
+    });
+
+    // 2. Búsqueda Global
+    if (search) {
+      const lowerSearch = search.toLowerCase();
+      result = result.filter((item) => {
+        return Object.values(item).some((val) => {
+          if (val === null || val === undefined) return false;
+          if (Array.isArray(val))
+            return val.some((v) =>
+              String(v).toLowerCase().includes(lowerSearch),
+            );
+          if (typeof val === "object") return false;
+          return String(val).toLowerCase().includes(lowerSearch);
+        });
+      });
+    }
+
+    return result;
+  }, [data, search, columnFilters]);
 
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200">
-      {/* Header */}
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 animate-fade-in pb-4">
       <div className="p-4 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
         <h2 className="text-xl font-bold text-gray-800">{title}</h2>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          {/* Buscador */}
-          <div className="relative flex-1 md:w-64">
+        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap justify-end">
+          <div className="relative flex-1 md:w-64 min-w-[200px]">
             <Search
               className="absolute left-3 top-2.5 text-gray-400"
               size={18}
@@ -43,14 +97,13 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
             />
           </div>
 
-          {/* Selector de Columnas */}
           <div className="relative">
             <button
               onClick={() => setShowColumnSelector(!showColumnSelector)}
               className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 transition"
             >
-              <Eye size={18} />{" "}
-              <span className="hidden sm:inline">Columnas</span>{" "}
+              <Eye size={18} />
+              <span className="hidden sm:inline">Columnas</span>
               <ChevronDown size={14} />
             </button>
 
@@ -82,19 +135,157 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
         </div>
       </div>
 
-      {/* Tabla */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto min-h-[300px]" ref={filterRef}>
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-gray-50 text-gray-600 text-sm uppercase">
+            <tr className="bg-gray-50 text-gray-600 text-sm uppercase border-b border-gray-200">
               {columns.map(
                 (col) =>
                   visibleColumns[col.key] && (
                     <th
                       key={col.key}
-                      className="p-4 border-b font-semibold whitespace-nowrap"
+                      className="p-4 font-semibold whitespace-nowrap relative group"
                     >
-                      {col.label}
+                      <div className="flex items-center justify-between">
+                        <span>{col.label}</span>
+
+                        {col.filterOptions && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (activeFilterDropdown !== col.filterKey) {
+                                setFilterSearchTerm(""); // Resetear búsqueda al abrir
+                              }
+                              setActiveFilterDropdown(
+                                activeFilterDropdown === col.filterKey
+                                  ? null
+                                  : col.filterKey,
+                              );
+                            }}
+                            className={`ml-2 p-1 rounded transition-colors duration-200 ${
+                              columnFilters[col.filterKey]?.length > 0 ||
+                              activeFilterDropdown === col.filterKey
+                                ? "text-primary bg-blue-50 ring-1 ring-blue-200"
+                                : "text-gray-400 hover:text-primary hover:bg-gray-100"
+                            }`}
+                            title={`Filtrar por ${col.label}`}
+                          >
+                            <Filter
+                              size={14}
+                              fill={
+                                columnFilters[col.filterKey]?.length > 0
+                                  ? "currentColor"
+                                  : "none"
+                              }
+                            />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Dropdown de Filtro */}
+                      {activeFilterDropdown === col.filterKey &&
+                        col.filterOptions && (
+                          <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 animate-fade-in flex flex-col max-h-80">
+                            <div className="p-3 border-b border-gray-100 bg-gray-50 rounded-t-lg">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                  Filtrar por {col.label}
+                                </span>
+                                <button
+                                  onClick={() => setActiveFilterDropdown(null)}
+                                >
+                                  <X
+                                    size={14}
+                                    className="text-gray-400 hover:text-red-500"
+                                  />
+                                </button>
+                              </div>
+
+                              {/* NUEVO: Buscador interno para los checkboxes */}
+                              <div className="relative">
+                                <Search
+                                  className="absolute left-2 top-2 text-gray-400"
+                                  size={12}
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="Buscar en lista..."
+                                  className="w-full pl-7 pr-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary focus:border-primary"
+                                  value={filterSearchTerm}
+                                  onChange={(e) =>
+                                    setFilterSearchTerm(e.target.value)
+                                  }
+                                  autoFocus
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="overflow-y-auto p-2 space-y-1 flex-1">
+                              {/* Filtramos las opciones según lo que escribe el usuario */}
+                              {col.filterOptions
+                                .filter((opt) =>
+                                  opt
+                                    .toLowerCase()
+                                    .includes(filterSearchTerm.toLowerCase()),
+                                )
+                                .map((option) => (
+                                  <label
+                                    key={option}
+                                    className="flex items-center px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer transition-colors"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        columnFilters[col.filterKey]?.includes(
+                                          option,
+                                        ) || false
+                                      }
+                                      onChange={() =>
+                                        handleFilterChange(
+                                          col.filterKey,
+                                          option,
+                                        )
+                                      }
+                                      className="mr-2 text-primary focus:ring-primary rounded border-gray-300"
+                                    />
+                                    <span
+                                      className="text-sm text-gray-700 normal-case font-normal truncate"
+                                      title={option}
+                                    >
+                                      {option}
+                                    </span>
+                                  </label>
+                                ))}
+                              {col.filterOptions.filter((opt) =>
+                                opt
+                                  .toLowerCase()
+                                  .includes(filterSearchTerm.toLowerCase()),
+                              ).length === 0 && (
+                                <div className="text-center text-xs text-gray-400 py-2">
+                                  No hay coincidencias
+                                </div>
+                              )}
+                            </div>
+
+                            {columnFilters[col.filterKey]?.length > 0 && (
+                              <div className="p-2 border-t border-gray-100 bg-gray-50 rounded-b-lg">
+                                <button
+                                  onClick={() =>
+                                    setColumnFilters((prev) => {
+                                      const { [col.filterKey]: _, ...r } = prev;
+                                      return r;
+                                    })
+                                  }
+                                  className="text-xs text-red-600 font-medium hover:underline w-full text-center"
+                                >
+                                  Limpiar filtros (
+                                  {columnFilters[col.filterKey].length})
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                     </th>
                   ),
               )}
@@ -120,8 +311,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                     (col) =>
                       visibleColumns[col.key] && (
                         <td key={col.key} className="p-4 text-sm text-gray-700">
-                          {/* Si tiene función render, la usa; si no, muestra el dato crudo */}
-                          {col.render ? col.render(row) : row[col.key]}
+                          {col.render ? col.render(row) : row[col.key] || "-"}
                         </td>
                       ),
                   )}
@@ -131,11 +321,9 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
           </tbody>
         </table>
       </div>
-
-      {/* Footer Tabla */}
-      <div className="p-4 border-t text-sm text-gray-500 flex justify-between">
-        <span>Total: {data.length} registros</span>
-        <span>Mostrando: {filteredData.length}</span>
+      <div className="px-4 pt-4 border-t border-gray-200 text-sm text-gray-500 flex justify-between">
+        <span>Total visible: {filteredData.length}</span>
+        <span>Total registros: {Array.isArray(data) ? data.length : 0}</span>
       </div>
     </div>
   );

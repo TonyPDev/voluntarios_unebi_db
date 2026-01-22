@@ -13,19 +13,21 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const checkUserStatus = () => {
-    const token = localStorage.getItem("access_token");
+    // Usaremos "token" como clave estándar
+    const token = localStorage.getItem("token");
+
     if (token) {
       try {
         const decoded = jwtDecode(token);
-        // Asumimos que el backend envía 'user_id' o similar en el payload
-        // Si necesitas roles, asegúrate que el backend los incluya en el token
         setUser({
           id: decoded.user_id,
-          isAdmin: decoded.is_staff || false, // Ajustar según tu payload JWT real
+          username: decoded.username,
+          isAdmin: decoded.is_staff,
+          full_name: decoded.full_name || decoded.username,
         });
       } catch (error) {
-        localStorage.clear();
-        setUser(null);
+        console.error("Token inválido", error);
+        logout(); // Si el token está corrupto, limpiamos
       }
     }
     setLoading(false);
@@ -34,20 +36,37 @@ export const AuthProvider = ({ children }) => {
   const login = async (username, password) => {
     try {
       const response = await api.post("token/", { username, password });
-      localStorage.setItem("access_token", response.data.access);
-      localStorage.setItem("refresh_token", response.data.refresh);
-      checkUserStatus();
+
+      // Guardamos con la clave "token"
+      localStorage.setItem("token", response.data.access);
+      localStorage.setItem("refresh", response.data.refresh);
+
+      // Decodificamos inmediatamente para actualizar el estado
+      const decoded = jwtDecode(response.data.access);
+      setUser({
+        id: decoded.user_id,
+        username: decoded.username,
+        isAdmin: decoded.is_staff,
+        full_name: decoded.full_name || decoded.username,
+      });
+
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: error.response?.data?.detail || "Error de conexión",
-      };
+      // Manejo robusto de errores
+      let errorMsg = "Error de conexión";
+      if (error.response?.data) {
+        if (error.response.data.detail) errorMsg = error.response.data.detail;
+        else if (error.response.data.non_field_errors)
+          errorMsg = error.response.data.non_field_errors[0];
+        else errorMsg = JSON.stringify(error.response.data);
+      }
+      return { success: false, error: errorMsg };
     }
   };
 
   const logout = () => {
-    localStorage.clear();
+    localStorage.removeItem("token");
+    localStorage.removeItem("refresh");
     setUser(null);
   };
 
