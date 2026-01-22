@@ -1,0 +1,58 @@
+# =================================================================
+# General (Sistema Operativo, IDEs, etc.)
+# =================================================================
+.DS_Store
+.vscode/
+.vs/
+.vs
+.idea/
+*.suo
+*.user
+
+# =================================================================
+# Backend (Python / Django)
+# =================================================================
+venv/
+env/
+ENV/
+__pycache__/
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+media/
+/staticfiles/
+/static/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+# =================================================================
+# Frontend (Node.js / React / Vite)
+# =================================================================
+# Dependencias
+node_modules
+package-lock.json
+
+/frontend/node_modules/
+
+# Archivos de build y caché de Vite
+/frontend/dist/
+/frontend/.vite/
+
+# Archivos de log
+/frontend/npm-debug.log*
+/frontend/yarn-error.log
+/frontend/yarn.lock
+
+# Variables de entorno locales
+/frontend/.env
+/frontend/.env.local
+/frontend/.env.*.local
+
+# Reportes de tests
+/frontend/coverage/
