@@ -1,7 +1,7 @@
-import { useState, useEffect, useContext, useMemo } from "react"; // Agregamos useMemo
+import { useState, useEffect, useContext, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import api from "../api/axios";
-import { Calendar, Plus, CheckCircle } from "lucide-react";
+import { Calendar, Plus, CheckCircle, Lock } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import SearchableSelect from "./SearchableSelect";
 
@@ -11,6 +11,7 @@ const ParticipationManager = ({
   onUpdate,
   readOnly = false,
   onExternalUpdate,
+  volunteerStatus, // Recibimos el estatus
 }) => {
   const { user } = useContext(AuthContext);
   const [studies, setStudies] = useState([]);
@@ -20,6 +21,7 @@ const ParticipationManager = ({
   const { register, handleSubmit, reset, setValue, watch } = useForm();
 
   useEffect(() => {
+    // Cargamos estudios solo si es admin y puede editar
     if (!readOnly && user?.isAdmin) {
       api
         .get("studies/")
@@ -28,15 +30,25 @@ const ParticipationManager = ({
     }
   }, [readOnly, user]);
 
-  // Filtramos los estudios para mostrar solo aquellos en los que el voluntario NO ha participado aún.
+  // Filtro Maestro:
+  // 1. Que no haya participado ya.
+  // 2. Que el estudio esté VIGENTE (is_active).
   const availableStudies = useMemo(() => {
     return studies.filter((study) => {
-      // Verificamos si el ID del estudio ya existe en la lista de participaciones
-      return !participations.some((part) => part.study === study.id);
+      const alreadyParticipated = participations.some(
+        (part) => part.study === study.id,
+      );
+      const isActive = study.is_active;
+      return !alreadyParticipated && isActive;
     });
   }, [studies, participations]);
 
+  // Regla de Negocio: Solo APTO puede inscribirse
+  const isEligibleForNewStudy = volunteerStatus === "Apto";
+  const canAdd = user?.isAdmin && !readOnly && isEligibleForNewStudy;
+
   const handleAddParticipation = async (data) => {
+    // (Lógica igual a la anterior) ...
     setServerError("");
     try {
       await api.post(`volunteers/${volunteerId}/add-participation/`, {
@@ -45,17 +57,14 @@ const ParticipationManager = ({
       });
       reset();
       setIsAdding(false);
-
       onUpdate();
-
       if (onExternalUpdate) onExternalUpdate();
     } catch (error) {
-      setServerError(error.response?.data?.detail || "Error al registrar.");
+      setServerError(error.response?.data?.detail || "Error.");
     }
   };
 
   const newStudyId = watch("study_id");
-  const canAdd = user?.isAdmin && !readOnly;
 
   return (
     <div className="mt-8 border-t pt-8">
@@ -63,19 +72,34 @@ const ParticipationManager = ({
         <h3 className="text-xl font-bold text-gray-800 flex items-center">
           <Calendar className="mr-2" /> Historial de Estudios
         </h3>
-        {!isAdding && canAdd && (
-          <button
-            onClick={() => setIsAdding(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded flex items-center hover:bg-green-700 text-sm font-medium"
-          >
-            <Plus size={16} className="mr-2" /> Registrar en Nuevo Estudio
-          </button>
-        )}
+
+        {/* Lógica del Botón */}
+        {!isAdding &&
+          user?.isAdmin &&
+          !readOnly &&
+          (isEligibleForNewStudy ? (
+            <button
+              onClick={() => setIsAdding(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded flex items-center hover:bg-green-700 text-sm font-medium transition-colors shadow-sm"
+            >
+              <Plus size={16} className="mr-2" /> Registrar en Nuevo Estudio
+            </button>
+          ) : (
+            <div
+              className="flex items-center text-gray-400 bg-gray-100 px-3 py-2 rounded-md border border-gray-200 cursor-not-allowed text-xs"
+              title="El voluntario debe estar 'Apto' para inscribirse."
+            >
+              <Lock size={14} className="mr-2" />
+              <span>Inscripción bloqueada ({volunteerStatus})</span>
+            </div>
+          ))}
       </div>
 
       {isAdding && (
-        <div className="bg-gray-50 border border-gray-200 p-6 rounded-lg mb-6 animate-fade-in">
-          <h4 className="font-bold text-lg mb-4 text-gray-700">Inscripción</h4>
+        <div className="bg-gray-50 border border-gray-200 p-6 rounded-lg mb-6 animate-fade-in shadow-sm">
+          <h4 className="font-bold text-lg mb-4 text-gray-700">
+            Inscripción a Estudio Vigente
+          </h4>
           {serverError && (
             <div className="bg-red-100 text-red-700 p-3 rounded mb-4 text-sm">
               {serverError}
@@ -87,8 +111,8 @@ const ParticipationManager = ({
           >
             <div>
               <SearchableSelect
-                label="Seleccionar Estudio"
-                placeholder="Escribe para buscar..."
+                label="Seleccionar Estudio (Solo Vigentes)"
+                placeholder="Buscar..."
                 options={availableStudies}
                 value={newStudyId}
                 onChange={(val) =>
@@ -98,11 +122,11 @@ const ParticipationManager = ({
               />
               {availableStudies.length === 0 && (
                 <p className="text-xs text-orange-600 mt-1">
-                  Este voluntario ya ha participado en todos los estudios
-                  disponibles.
+                  No hay estudios vigentes disponibles.
                 </p>
               )}
             </div>
+            {/* Input Justificación y Botones IGUAL que antes ... */}
             <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
               <label className="block text-sm font-bold text-yellow-800 mb-1">
                 Justificación
@@ -117,7 +141,7 @@ const ParticipationManager = ({
               <button
                 type="button"
                 onClick={() => setIsAdding(false)}
-                className="px-4 py-2 border rounded"
+                className="px-4 py-2 border rounded bg-white"
               >
                 Cancelar
               </button>
@@ -132,6 +156,7 @@ const ParticipationManager = ({
         </div>
       )}
 
+      {/* Tabla de historial (se mantiene IGUAL) ... */}
       <div className="overflow-hidden border rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
