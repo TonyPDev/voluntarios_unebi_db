@@ -1,5 +1,14 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { ChevronDown, Eye, Search, Filter, X } from "lucide-react";
+import {
+  ChevronDown,
+  Eye,
+  Search,
+  Filter,
+  X,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
 
 const SmartTable = ({ data = [], columns = [], title, actions }) => {
   const [visibleColumns, setVisibleColumns] = useState(
@@ -10,9 +19,10 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
 
   const [columnFilters, setColumnFilters] = useState({});
   const [activeFilterDropdown, setActiveFilterDropdown] = useState(null);
-
-  // NUEVO: Estado para el buscador interno del filtro
   const [filterSearchTerm, setFilterSearchTerm] = useState("");
+
+  // ESTADO PARA ORDENAMIENTO
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
   const filterRef = useRef(null);
 
@@ -20,7 +30,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
     const handleClickOutside = (event) => {
       if (filterRef.current && !filterRef.current.contains(event.target)) {
         setActiveFilterDropdown(null);
-        setFilterSearchTerm(""); // Limpiar búsqueda al cerrar
+        setFilterSearchTerm("");
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -42,8 +52,17 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
     });
   };
 
+  // Manejador de Ordenamiento
+  const handleSort = (key) => {
+    let direction = "asc";
+    if (sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+  };
+
   const filteredData = useMemo(() => {
-    let result = Array.isArray(data) ? data : [];
+    let result = Array.isArray(data) ? [...data] : [];
 
     // 1. Filtrado por Columnas
     Object.entries(columnFilters).forEach(([key, selectedValues]) => {
@@ -74,11 +93,24 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
       });
     }
 
+    // 3. Ordenamiento
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        const aVal = a[sortConfig.key] || "";
+        const bVal = b[sortConfig.key] || "";
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
     return result;
-  }, [data, search, columnFilters]);
+  }, [data, search, columnFilters, sortConfig]);
 
   return (
     <div className="bg-white rounded-lg shadow-md border border-gray-200 animate-fade-in pb-4">
+      {/* Header General */}
       <div className="p-4 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
         <h2 className="text-xl font-bold text-gray-800">{title}</h2>
 
@@ -135,6 +167,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
         </div>
       </div>
 
+      {/* Tabla */}
       <div className="overflow-x-auto min-h-[300px]" ref={filterRef}>
         <table className="w-full text-left border-collapse">
           <thead>
@@ -144,17 +177,40 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                   visibleColumns[col.key] && (
                     <th
                       key={col.key}
-                      className="p-4 font-semibold whitespace-nowrap relative group"
+                      className="p-4 font-semibold whitespace-nowrap relative group select-none"
                     >
-                      <div className="flex items-center justify-between">
-                        <span>{col.label}</span>
+                      <div className="flex items-center justify-between gap-1">
+                        {/* Texto de Columna con Ordenamiento */}
+                        <div
+                          className={`flex items-center cursor-pointer hover:text-primary transition ${col.sortable ? "" : "cursor-default"}`}
+                          onClick={() => col.sortable && handleSort(col.key)}
+                        >
+                          <span>{col.label}</span>
+                          {col.sortable && (
+                            <span className="ml-1 text-gray-400">
+                              {sortConfig.key === col.key ? (
+                                sortConfig.direction === "asc" ? (
+                                  <ArrowUp size={14} />
+                                ) : (
+                                  <ArrowDown size={14} />
+                                )
+                              ) : (
+                                <ArrowUpDown
+                                  size={14}
+                                  className="opacity-0 group-hover:opacity-50"
+                                />
+                              )}
+                            </span>
+                          )}
+                        </div>
 
+                        {/* Botón de Filtro */}
                         {col.filterOptions && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               if (activeFilterDropdown !== col.filterKey) {
-                                setFilterSearchTerm(""); // Resetear búsqueda al abrir
+                                setFilterSearchTerm("");
                               }
                               setActiveFilterDropdown(
                                 activeFilterDropdown === col.filterKey
@@ -162,7 +218,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                                   : col.filterKey,
                               );
                             }}
-                            className={`ml-2 p-1 rounded transition-colors duration-200 ${
+                            className={`p-1 rounded transition-colors duration-200 ${
                               columnFilters[col.filterKey]?.length > 0 ||
                               activeFilterDropdown === col.filterKey
                                 ? "text-primary bg-blue-50 ring-1 ring-blue-200"
@@ -182,10 +238,10 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                         )}
                       </div>
 
-                      {/* Dropdown de Filtro */}
+                      {/* Dropdown de Filtro (Mismo código que antes) */}
                       {activeFilterDropdown === col.filterKey &&
                         col.filterOptions && (
-                          <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 animate-fade-in flex flex-col max-h-80">
+                          <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 animate-fade-in flex flex-col max-h-80 cursor-default">
                             <div className="p-3 border-b border-gray-100 bg-gray-50 rounded-t-lg">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
@@ -200,8 +256,6 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                                   />
                                 </button>
                               </div>
-
-                              {/* NUEVO: Buscador interno para los checkboxes */}
                               <div className="relative">
                                 <Search
                                   className="absolute left-2 top-2 text-gray-400"
@@ -222,7 +276,6 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                             </div>
 
                             <div className="overflow-y-auto p-2 space-y-1 flex-1">
-                              {/* Filtramos las opciones según lo que escribe el usuario */}
                               {col.filterOptions
                                 .filter((opt) =>
                                   opt

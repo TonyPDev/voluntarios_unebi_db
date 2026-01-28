@@ -17,18 +17,19 @@ const VolunteerList = () => {
   const [isViewMode, setIsViewMode] = useState(false);
 
   const fetchVolunteers = async () => {
-    // Si el modal está abierto (estamos editando), no ponemos loading a true
-    // para evitar que la tabla de fondo parpadee o desaparezca.
     if (!isModalOpen) setLoading(true);
 
     try {
       const res = await api.get("volunteers/");
       const processedData = res.data.map((v) => ({
         ...v,
+        // Campo auxiliar para ordenamiento y búsqueda
         full_name_search:
           `${v.first_name} ${v.middle_name || ""} ${v.last_name_paternal} ${v.last_name_maternal}`.trim(),
+
+        // Filtros
         study_names_filter: v.participations?.map((p) => p.study_name) || [],
-        status_filter: v.is_eligible ? "Apto" : "En espera",
+        status_filter: v.status,
       }));
       setVolunteers(processedData);
     } catch (error) {
@@ -47,24 +48,20 @@ const VolunteerList = () => {
     setIsViewMode(false);
     setIsModalOpen(true);
   };
-
   const handleEdit = (id) => {
     setSelectedVolunteerId(id);
     setIsViewMode(false);
     setIsModalOpen(true);
   };
-
   const handleView = (id) => {
     setSelectedVolunteerId(id);
     setIsViewMode(true);
     setIsModalOpen(true);
   };
-
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setSelectedVolunteerId(null);
   };
-
   const handleSuccess = () => {
     handleCloseModal();
     fetchVolunteers();
@@ -79,40 +76,55 @@ const VolunteerList = () => {
     return Array.from(options).sort();
   }, [volunteers]);
 
+  // Nuevas opciones de Estatus
+  const statusOptions = [
+    "En espera por aprobación", // Nuevo Default
+    "Apto", // Manual
+    "Rechazado", // Manual
+    "No elegible por edad",
+    "En estudio", // Automático (Activo)
+    "Estudio asignado", // Automático (Futuro)
+    "En espera (Descanso)", // Automático (Washout 3 meses)
+  ];
   const columns = [
     {
       key: "code",
       label: "Código",
+      sortable: true, // Habilitar Ordenamiento Alfabético
       render: (row) => (
         <span className="font-mono font-bold text-primary">{row.code}</span>
       ),
     },
     {
-      key: "full_name",
+      key: "full_name_search", // Usamos el campo completo para ordenar
       label: "Nombre Completo",
-      render: (row) =>
-        `${row.first_name} ${row.last_name_paternal} ${row.last_name_maternal}`,
+      sortable: true, // Habilitar Ordenamiento Alfabético
     },
     {
-      key: "history",
-      label: "Historial Estudios",
-      filterKey: "study_names_filter",
-      filterOptions: studyOptions,
+      key: "active_study",
+      label: "Estudio Actual",
+      render: (row) =>
+        row.active_study ? (
+          <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-bold">
+            {row.active_study}
+          </span>
+        ) : (
+          <span className="text-gray-400 text-sm">-</span>
+        ),
+    },
+    {
+      key: "last_study",
+      label: "Último Estudio",
       render: (row) => (
-        <div className="flex flex-wrap gap-1 max-w-xs">
-          {row.participations && row.participations.length > 0 ? (
-            row.participations.map((p, index) => (
-              <span
-                key={index}
-                className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded border border-gray-200"
-              >
-                {p.study_name}
-              </span>
-            ))
-          ) : (
-            <span className="text-gray-400 text-xs italic">Sin historial</span>
-          )}
-        </div>
+        <span className="text-gray-600 text-sm italic">{row.last_study}</span>
+      ),
+    },
+    {
+      key: "age",
+      label: "Edad",
+      sortable: true,
+      render: (row) => (
+        <span className="text-gray-700 text-sm">{row.age || "-"}</span>
       ),
     },
     { key: "curp", label: "CURP" },
@@ -121,17 +133,27 @@ const VolunteerList = () => {
       key: "status_filter",
       label: "Estatus",
       filterKey: "status_filter",
-      filterOptions: ["Apto", "En espera"],
-      render: (row) =>
-        row.is_eligible ? (
-          <span className="text-green-600 font-bold text-sm bg-green-50 px-2 py-1 rounded-full border border-green-200">
-            Apto
+      filterOptions: statusOptions,
+      render: (row) => {
+        const colors = {
+          Apto: "bg-green-100 text-green-800 border-green-200",
+          "En espera por aprobación":
+            "bg-gray-100 text-gray-800 border-gray-200",
+          "En espera (Descanso)":
+            "bg-orange-100 text-orange-800 border-orange-200",
+          "En estudio": "bg-blue-100 text-blue-800 border-blue-200",
+          "Estudio asignado": "bg-indigo-100 text-indigo-800 border-indigo-200",
+          Rechazado: "bg-red-100 text-red-800 border-red-200",
+          "No elegible por edad": "bg-gray-200 text-gray-600 border-gray-300", // Color para edad
+        };
+        return (
+          <span
+            className={`font-bold text-xs px-2 py-1 rounded-full border ${colors[row.status] || "bg-gray-100 text-gray-800"}`}
+          >
+            {row.status}
           </span>
-        ) : (
-          <span className="text-red-500 font-bold text-sm bg-red-50 px-2 py-1 rounded-full border border-red-200">
-            En espera
-          </span>
-        ),
+        );
+      },
     },
     {
       key: "actions",
@@ -209,7 +231,6 @@ const VolunteerList = () => {
                 onClose={handleCloseModal}
                 onSuccess={handleSuccess}
                 readOnlyMode={isViewMode}
-                // NUEVO: Pasamos la función para refrescar la lista de fondo
                 onParticipationChange={fetchVolunteers}
               />
             </div>

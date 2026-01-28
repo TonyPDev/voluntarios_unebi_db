@@ -5,21 +5,39 @@ import datetime
 
 class Volunteer(models.Model):
     SEX_CHOICES = [('M', 'Masculino'), ('F', 'Femenino')]
+    
+    MANUAL_STATUS_CHOICES = [
+        ('waiting_approval', 'En espera por aprobación'),
+        ('eligible', 'Apto'),
+        ('rejected', 'Rechazado'),
+    ]
+
     code = models.CharField(max_length=20, unique=True, editable=False)
     first_name = models.CharField(max_length=100)
     middle_name = models.CharField(max_length=100, blank=True, null=True)
     last_name_paternal = models.CharField(max_length=100)
     last_name_maternal = models.CharField(max_length=100)
+    
+    # NUEVO CAMPO
+    birth_date = models.DateField(verbose_name="Fecha de Nacimiento", null=True, blank=True)
+    
     sex = models.CharField(max_length=1, choices=SEX_CHOICES)
     phone = models.CharField(max_length=20)
     curp = models.CharField(
         max_length=18, 
         unique=True, 
         verbose_name="CURP",
-        error_messages={
-            'unique': "Ya existe un voluntario registrado con esta CURP."
-        }
+        error_messages={'unique': "Ya existe un voluntario registrado con esta CURP."}
     )
+    
+    manual_status = models.CharField(
+        max_length=20, 
+        choices=MANUAL_STATUS_CHOICES, 
+        default='waiting_approval',
+        verbose_name="Estatus Administrativo"
+    )
+    status_reason = models.TextField(blank=True, verbose_name="Motivo del Estatus")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -38,10 +56,18 @@ class Volunteer(models.Model):
     def full_name(self):
          return f"{self.first_name} {self.last_name_paternal} {self.last_name_maternal}"
 
+    # Helper para calcular edad
+    @property
+    def age(self):
+        if not self.birth_date:
+            return 0
+        today = datetime.date.today()
+        return today.year - self.birth_date.year - ((today.month, today.day) < (self.birth_date.month, self.birth_date.day))
+
+# (El modelo Participation queda igual, no es necesario tocarlo)
 class Participation(models.Model):
     volunteer = models.ForeignKey(Volunteer, on_delete=models.CASCADE, related_name='participations')
     study = models.ForeignKey(Study, on_delete=models.PROTECT, related_name='participants')
-    
 
     def clean(self):
         active_participations = Participation.objects.filter(
