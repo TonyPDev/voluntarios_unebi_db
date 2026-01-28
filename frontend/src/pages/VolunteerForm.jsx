@@ -2,7 +2,7 @@ import { useState, useEffect, useContext } from "react";
 import api from "../api/axios";
 import { useForm } from "react-hook-form";
 import ParticipationManager from "../components/ParticipationManager";
-import { Calendar, Lock } from "lucide-react";
+import { Calendar, Lock, ShieldCheck } from "lucide-react"; // ShieldCheck para icono de admin
 import { AuthContext } from "../context/AuthContext";
 import SearchableSelect from "../components/SearchableSelect";
 
@@ -29,6 +29,9 @@ const VolunteerForm = ({
   const [participations, setParticipations] = useState([]);
   const [studies, setStudies] = useState([]);
 
+  // Observamos el estatus manual para mostrar/ocultar el campo de motivo
+  const manualStatus = watch("manual_status");
+
   useEffect(() => {
     if (isEditing) {
       loadVolunteerData();
@@ -51,14 +54,8 @@ const VolunteerForm = ({
       .get(`volunteers/${idToEdit}/`)
       .then((res) => {
         const data = res.data;
-        setValue("first_name", data.first_name);
-        // ... (resto de setValues igual que antes)
-        setValue("middle_name", data.middle_name);
-        setValue("last_name_paternal", data.last_name_paternal);
-        setValue("last_name_maternal", data.last_name_maternal);
-        setValue("sex", data.sex);
-        setValue("phone", data.phone);
-        setValue("curp", data.curp);
+        // Rellenar campos normales
+        Object.keys(data).forEach((key) => setValue(key, data[key]));
 
         setParticipations(data.participations || []);
       })
@@ -75,6 +72,19 @@ const VolunteerForm = ({
       delete payload.initial_study_id;
       delete payload.initial_admission_date;
     }
+
+    // Validación de motivo para estatus específicos
+    if (
+      (payload.manual_status === "rejected" ||
+        payload.manual_status === "eligible") &&
+      !payload.status_reason
+    ) {
+      setServerError(
+        "Debes escribir un motivo para el estatus seleccionado (Apto o Rechazado).",
+      );
+      return;
+    }
+
     try {
       if (isEditing) {
         await api.put(`volunteers/${idToEdit}/`, payload);
@@ -152,6 +162,17 @@ const VolunteerForm = ({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">
+              Fecha de Nacimiento
+            </label>
+            <input
+              type="date"
+              {...register("birth_date", { required: !isReadOnly })}
+              disabled={isReadOnly}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
               Sexo
             </label>
             <select
@@ -189,6 +210,53 @@ const VolunteerForm = ({
           </div>
         </div>
 
+        {/* SECCIÓN DE ESTATUS ADMINISTRATIVO (Solo Admin) */}
+        {user?.isAdmin && (
+          <div className="bg-purple-50 p-6 rounded-lg border border-purple-200 mt-6">
+            <h3 className="font-bold text-purple-800 mb-4 flex items-center">
+              <ShieldCheck className="mr-2" /> Dictamen Administrativo
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Estatus Manual
+                </label>
+                <select
+                  {...register("manual_status")}
+                  disabled={isReadOnly}
+                  className="mt-1 block w-full p-2 border border-purple-300 rounded focus:ring-purple-500 focus:border-purple-500 bg-white"
+                >
+                  <option value="waiting_approval">
+                    En espera por aprobación
+                  </option>
+                  <option value="eligible">Apto</option>
+                  <option value="rejected">Rechazado</option>
+                </select>
+              </div>
+
+              {/* Mostrar motivo solo si es relevante o ya tiene uno */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  {manualStatus === "rejected"
+                    ? "Motivo de Rechazo"
+                    : "Observaciones / Motivo"}
+                </label>
+                <input
+                  type="text"
+                  {...register("status_reason")}
+                  disabled={isReadOnly}
+                  placeholder={
+                    manualStatus === "rejected"
+                      ? "Ej: No pasó prueba médica"
+                      : "Opcional"
+                  }
+                  className="mt-1 block w-full p-2 border border-purple-300 rounded focus:ring-purple-500 focus:border-purple-500"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {!isEditing && (
           <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 mt-6">
             <h3 className="font-bold text-blue-800 mb-4 flex items-center">
@@ -221,11 +289,11 @@ const VolunteerForm = ({
         {isEditing && !isReadOnly && (
           <div className="bg-yellow-50 p-4 rounded border border-yellow-200 mt-6">
             <label className="block text-sm font-bold text-yellow-800 mb-2">
-              Justificación del Cambio
+              Justificación del Cambio (Auditoría)
             </label>
             <textarea
               {...register("justification", { required: true })}
-              placeholder="Motivo..."
+              placeholder="Motivo general de la edición..."
               className="w-full p-2 border border-yellow-300 rounded h-20 focus:ring-yellow-500 focus:border-yellow-500"
             ></textarea>
           </div>
@@ -257,7 +325,6 @@ const VolunteerForm = ({
             participations={participations}
             onUpdate={loadVolunteerData}
             readOnly={isReadOnly}
-            // NUEVO: Pasamos la notificación al manager
             onExternalUpdate={onParticipationChange}
           />
         </div>
