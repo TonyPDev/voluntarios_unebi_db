@@ -169,6 +169,8 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
     return result;
   }, [data, search, columnFilters, sortConfig, columns]);
 
+  const visibleColsList = columns.filter((col) => visibleColumns[col.key]);
+  const lastVisibleColumnKey = visibleColsList[visibleColsList.length - 1]?.key;
   return (
     <div className="bg-white rounded-lg shadow-md border border-gray-200 animate-fade-in pb-4 flex flex-col h-full w-full max-w-full overflow-hidden">
       <div className="p-4 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -294,13 +296,15 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                           </button>
                         )}
                       </div>
-                      <div
-                        onMouseDown={(e) => startResizing(e, col.key)}
-                        className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-20 flex justify-center hover:bg-blue-50 opacity-0 hover:opacity-100 transition-opacity"
-                        style={{ right: "-6px" }}
-                      >
-                        <div className="w-px h-full bg-blue-300"></div>
-                      </div>
+                      {col.key !== lastVisibleColumnKey && (
+                        <div
+                          onMouseDown={(e) => startResizing(e, col.key)}
+                          className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-20 flex justify-center hover:bg-blue-50 opacity-0 hover:opacity-100 transition-opacity"
+                          style={{ right: "-6px" }}
+                        >
+                          <div className="w-px h-full bg-blue-300"></div>
+                        </div>
+                      )}
                       {activeFilterDropdown === col.filterKey &&
                         col.filterOptions && (
                           <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 animate-fade-in flex flex-col max-h-80 cursor-default">
