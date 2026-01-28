@@ -13,14 +13,15 @@ const DashboardLayout = () => {
     navigate("/login");
   };
 
-  // Función auxiliar para saber si un link está activo
   const isActive = (path) => location.pathname.startsWith(path);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* HEADER REDISEÑADO */}
+      {/* HEADER: Cambiamos max-w-7xl a max-w-[98%] o w-full px-4 */}
       <nav className="bg-white shadow-md border-b border-gray-100 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
+          {" "}
+          {/* <-- CAMBIO AQUÍ: w-full en lugar de max-w-7xl mx-auto */}
           <div className="flex justify-between h-16">
             <div className="flex items-center">
               <Link to="/" className="flex items-center gap-2 group">
@@ -32,10 +33,8 @@ const DashboardLayout = () => {
                 </span>
               </Link>
 
-              {/* Separador Vertical */}
               <div className="hidden md:block h-6 w-px bg-gray-300 mx-6"></div>
 
-              {/* Enlaces de Navegación */}
               <div className="hidden md:flex space-x-4">
                 <Link
                   to="/voluntarios"
@@ -65,9 +64,7 @@ const DashboardLayout = () => {
               </div>
             </div>
 
-            {/* PERFIL Y SALIR (DERECHA) */}
             <div className="flex items-center gap-4">
-              {/* Info Usuario */}
               <div className="hidden sm:flex flex-col items-end mr-2">
                 <span className="text-sm font-bold text-gray-800 leading-none">
                   {user?.full_name || user?.username || "Usuario"}
@@ -78,7 +75,6 @@ const DashboardLayout = () => {
               </div>
 
               <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold border border-blue-200">
-                {/* Iniciales del usuario */}
                 {(
                   user?.full_name?.[0] ||
                   user?.username?.[0] ||
@@ -100,14 +96,15 @@ const DashboardLayout = () => {
         </div>
       </nav>
 
-      {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 animate-fade-in">
+      {/* CONTENIDO PRINCIPAL: Cambiamos max-w-7xl a w-full px-6 */}
+      <main className="flex-1 w-full px-6 py-6 animate-fade-in">
+        {" "}
         <Outlet />
       </main>
 
-      {/* FOOTER SIMPLE */}
       <footer className="bg-white border-t border-gray-200 py-4 mt-auto">
-        <div className="max-w-7xl mx-auto px-6 text-center text-xs text-gray-400">
+        <div className="w-full px-6 text-center text-xs text-gray-400">
+          {" "}
           © 2026 Sistema de Gestión de Voluntarios UNEBI. Todos los derechos
           reservados.
         </div>

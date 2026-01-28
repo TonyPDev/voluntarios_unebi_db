@@ -1,10 +1,11 @@
 import { useState, useEffect, useContext } from "react";
 import api from "../api/axios";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import ParticipationManager from "../components/ParticipationManager";
-import { Calendar, Lock, ShieldCheck } from "lucide-react"; // ShieldCheck para icono de admin
+import { Calendar, Lock, ShieldCheck } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import SearchableSelect from "../components/SearchableSelect";
+import CustomDatePicker from "../components/CustomDatePicker";
 
 const VolunteerForm = ({
   idToEdit,
@@ -22,22 +23,22 @@ const VolunteerForm = ({
     handleSubmit,
     setValue,
     watch,
+    control,
     formState: { errors },
   } = useForm();
 
   const [serverError, setServerError] = useState("");
   const [participations, setParticipations] = useState([]);
   const [studies, setStudies] = useState([]);
+  const [currentStatus, setCurrentStatus] = useState(""); // Estatus real del backend
 
-  // Observamos el estatus manual para mostrar/ocultar el campo de motivo
   const manualStatus = watch("manual_status");
 
   useEffect(() => {
     if (isEditing) {
       loadVolunteerData();
-    } else {
-      loadStudies();
     }
+    loadStudies();
   }, [idToEdit]);
 
   const loadStudies = async () => {
@@ -49,31 +50,31 @@ const VolunteerForm = ({
     }
   };
 
+  const activeStudiesOnly = studies.filter((s) => s.is_active);
+
   const loadVolunteerData = () => {
     api
       .get(`volunteers/${idToEdit}/`)
       .then((res) => {
         const data = res.data;
-        // Rellenar campos normales
         Object.keys(data).forEach((key) => setValue(key, data[key]));
-
         setParticipations(data.participations || []);
+        setCurrentStatus(data.status); // Guardamos el estatus calculado
       })
-      .catch((err) => {
-        setServerError("No se pudo cargar el voluntario.");
-      });
+      .catch((err) => setServerError("No se pudo cargar el voluntario."));
   };
 
   const onSubmit = async (data) => {
     if (isReadOnly) return;
     setServerError("");
     const payload = { ...data };
+
     if (!payload.initial_study_id) {
       delete payload.initial_study_id;
       delete payload.initial_admission_date;
     }
 
-    // Validación de motivo para estatus específicos
+    // Validación de motivo obligatorio
     if (
       (payload.manual_status === "rejected" ||
         payload.manual_status === "eligible") &&
@@ -93,15 +94,21 @@ const VolunteerForm = ({
       }
       if (onSuccess) onSuccess();
     } catch (error) {
-      if (error.response && error.response.data) {
-        setServerError(JSON.stringify(error.response.data));
-      } else {
-        setServerError("Ocurrió un error inesperado.");
-      }
+      const msg = error.response?.data
+        ? JSON.stringify(error.response.data)
+        : "Error inesperado";
+      setServerError(msg);
     }
   };
 
   const selectedStudyId = watch("initial_study_id");
+
+  // Regla: Solo mostrar dictamen si está en un estado "administrativo"
+  const showDictamen =
+    user?.isAdmin &&
+    ["En espera por aprobación", "Apto", "Rechazado"].includes(
+      currentStatus || "En espera por aprobación",
+    );
 
   return (
     <div className="h-full flex flex-col">
@@ -113,8 +120,8 @@ const VolunteerForm = ({
       )}
 
       {serverError && (
-        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 break-words">
-          <p>{serverError}</p>
+        <div className="bg-red-100 text-red-700 p-4 mb-6 break-words border-l-4 border-red-500">
+          {serverError}
         </div>
       )}
 
@@ -127,7 +134,7 @@ const VolunteerForm = ({
             <input
               {...register("first_name", { required: !isReadOnly })}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1"
             />
           </div>
           <div>
@@ -137,7 +144,7 @@ const VolunteerForm = ({
             <input
               {...register("middle_name")}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1"
             />
           </div>
           <div>
@@ -147,7 +154,7 @@ const VolunteerForm = ({
             <input
               {...register("last_name_paternal", { required: !isReadOnly })}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1"
             />
           </div>
           <div>
@@ -157,20 +164,27 @@ const VolunteerForm = ({
             <input
               {...register("last_name_maternal", { required: !isReadOnly })}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1"
             />
           </div>
+
+          {/* Fecha de Nacimiento con DatePicker */}
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Fecha de Nacimiento
-            </label>
-            <input
-              type="date"
-              {...register("birth_date", { required: !isReadOnly })}
-              disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+            <Controller
+              control={control}
+              name="birth_date"
+              rules={{ required: !isReadOnly }}
+              render={({ field }) => (
+                <CustomDatePicker
+                  label="Fecha de Nacimiento"
+                  selectedDate={field.value}
+                  onChange={field.onChange}
+                  disabled={isReadOnly}
+                />
+              )}
             />
           </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Sexo
@@ -178,7 +192,7 @@ const VolunteerForm = ({
             <select
               {...register("sex", { required: !isReadOnly })}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1"
             >
               <option value="M">Masculino</option>
               <option value="F">Femenino</option>
@@ -191,7 +205,7 @@ const VolunteerForm = ({
             <input
               {...register("phone", { required: !isReadOnly })}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1"
             />
           </div>
           <div className="md:col-span-2">
@@ -205,14 +219,14 @@ const VolunteerForm = ({
                 minLength: 18,
               })}
               disabled={isReadOnly}
-              className="mt-1 block w-full p-2 border border-gray-300 rounded uppercase disabled:bg-gray-50 disabled:text-gray-600"
+              className="w-full p-2 border rounded mt-1 uppercase"
             />
           </div>
         </div>
 
-        {/* SECCIÓN DE ESTATUS ADMINISTRATIVO (Solo Admin) */}
-        {user?.isAdmin && (
-          <div className="bg-purple-50 p-6 rounded-lg border border-purple-200 mt-6">
+        {/* DICTAMEN ADMINISTRATIVO */}
+        {showDictamen && (
+          <div className="bg-purple-50 p-6 rounded-lg border border-purple-200 mt-6 animate-fade-in">
             <h3 className="font-bold text-purple-800 mb-4 flex items-center">
               <ShieldCheck className="mr-2" /> Dictamen Administrativo
             </h3>
@@ -224,7 +238,7 @@ const VolunteerForm = ({
                 <select
                   {...register("manual_status")}
                   disabled={isReadOnly}
-                  className="mt-1 block w-full p-2 border border-purple-300 rounded focus:ring-purple-500 focus:border-purple-500 bg-white"
+                  className="w-full p-2 border border-purple-300 rounded mt-1 bg-white"
                 >
                   <option value="waiting_approval">
                     En espera por aprobación
@@ -233,8 +247,6 @@ const VolunteerForm = ({
                   <option value="rejected">Rechazado</option>
                 </select>
               </div>
-
-              {/* Mostrar motivo solo si es relevante o ya tiene uno */}
               <div>
                 <label className="block text-sm font-medium text-gray-700">
                   {manualStatus === "rejected"
@@ -245,18 +257,19 @@ const VolunteerForm = ({
                   type="text"
                   {...register("status_reason")}
                   disabled={isReadOnly}
+                  className="w-full p-2 border border-purple-300 rounded mt-1"
                   placeholder={
                     manualStatus === "rejected"
                       ? "Ej: No pasó prueba médica"
                       : "Opcional"
                   }
-                  className="mt-1 block w-full p-2 border border-purple-300 rounded focus:ring-purple-500 focus:border-purple-500"
                 />
               </div>
             </div>
           </div>
         )}
 
+        {/* ASIGNACIÓN INICIAL */}
         {!isEditing && (
           <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 mt-6">
             <h3 className="font-bold text-blue-800 mb-4 flex items-center">
@@ -267,19 +280,22 @@ const VolunteerForm = ({
                 <SearchableSelect
                   label="Estudio Vigente"
                   placeholder="Buscar estudio..."
-                  options={studies}
+                  options={activeStudiesOnly}
                   value={selectedStudyId}
                   onChange={(val) => setValue("initial_study_id", val)}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  F. Internamiento
-                </label>
-                <input
-                  type="date"
-                  {...register("initial_admission_date")}
-                  className="mt-1 block w-full p-2 border border-blue-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                <Controller
+                  control={control}
+                  name="initial_admission_date"
+                  render={({ field }) => (
+                    <CustomDatePicker
+                      label="F. Internamiento"
+                      selectedDate={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
                 />
               </div>
             </div>
@@ -289,12 +305,12 @@ const VolunteerForm = ({
         {isEditing && !isReadOnly && (
           <div className="bg-yellow-50 p-4 rounded border border-yellow-200 mt-6">
             <label className="block text-sm font-bold text-yellow-800 mb-2">
-              Justificación del Cambio (Auditoría)
+              Justificación del Cambio (Auditable)
             </label>
             <textarea
               {...register("justification", { required: true })}
-              placeholder="Motivo general de la edición..."
-              className="w-full p-2 border border-yellow-300 rounded h-20 focus:ring-yellow-500 focus:border-yellow-500"
+              className="w-full p-2 border border-yellow-300 rounded h-20 placeholder-yellow-600/50"
+              placeholder="Describe por qué estás realizando este cambio..."
             ></textarea>
           </div>
         )}
@@ -326,6 +342,7 @@ const VolunteerForm = ({
             onUpdate={loadVolunteerData}
             readOnly={isReadOnly}
             onExternalUpdate={onParticipationChange}
+            volunteerStatus={currentStatus} // Pasamos el estatus para validación
           />
         </div>
       )}
