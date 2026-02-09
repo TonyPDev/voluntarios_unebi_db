@@ -275,29 +275,20 @@ const VolunteerForm = ({
             <h3 className="font-bold text-blue-800 mb-4 flex items-center">
               <Calendar className="mr-2" /> Asignación Inicial (Opcional)
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <SearchableSelect
-                  label="Estudio Vigente"
-                  placeholder="Buscar estudio..."
-                  options={activeStudiesOnly}
-                  value={selectedStudyId}
-                  onChange={(val) => setValue("initial_study_id", val)}
-                />
-              </div>
-              <div>
-                <Controller
-                  control={control}
-                  name="initial_admission_date"
-                  render={({ field }) => (
-                    <CustomDatePicker
-                      label="F. Internamiento"
-                      selectedDate={field.value}
-                      onChange={field.onChange}
-                    />
-                  )}
-                />
-              </div>
+            {/* Eliminamos el grid de 2 columnas para que el selector ocupe el ancho completo */}
+            <div className="w-full">
+              <SearchableSelect
+                label="Estudio Vigente"
+                placeholder="Buscar estudio..."
+                options={activeStudiesOnly}
+                value={selectedStudyId}
+                onChange={(val) => setValue("initial_study_id", val)}
+              />
+              <p className="text-xs text-blue-600 mt-2">
+                * Al seleccionar un estudio, el voluntario quedará inscrito
+                automáticamente con la fecha de internamiento configurada en
+                dicho estudio.
+              </p>
             </div>
           </div>
         )}

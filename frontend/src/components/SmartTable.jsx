@@ -226,7 +226,10 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
         </div>
       </div>
 
-      <div className="overflow-x-auto w-full flex-1" ref={filterRef}>
+      <div
+        className="overflow-x-auto w-full flex-1 min-h-[450px] pb-32"
+        ref={filterRef}
+      >
         {/* Agregamos min-w-full para que ocupe todo el ancho disponible */}
         <table
           className="min-w-full text-left border-collapse"
@@ -380,7 +383,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                                   .toLowerCase()
                                   .includes(filterSearchTerm.toLowerCase()),
                               ).length === 0 && (
-                                <div className="text-center text-xs text-gray-400 py-2">
+                                <div className="text-center text-xs text-gray-400 py-8">
                                   No hay resultados
                                 </div>
                               )}
