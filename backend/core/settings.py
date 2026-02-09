@@ -29,7 +29,7 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.20.109']
 
 
 # Application definition
@@ -80,7 +80,8 @@ SIMPLE_JWT = {
 
 # Configuración CORS (Para permitir conexión con React)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173", # Puerto por defecto de Vite
+    "http://localhost:5173",
+    "http://192.168.20.109:5173", 
 ]
 
 ROOT_URLCONF = 'core.urls'

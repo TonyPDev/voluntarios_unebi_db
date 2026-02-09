@@ -19,7 +19,10 @@ urlpatterns = [
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
-    path('api/', include('volunteers.urls')), 
+    # --- CORRECCIÓN AQUÍ ---
+    # Cambiamos 'api/' por 'api/volunteers/' para que sea específico
+    # y deje pasar a las demás rutas como 'studies' o 'admin'
+    path('api/volunteers/', include('volunteers.urls')), 
     
     path('api/studies/', include('studies.urls')),
     

@@ -1,94 +1,90 @@
 from django.db import models
-from django.core.exceptions import ValidationError
-from studies.models import Study
-import datetime
+from django.core.validators import RegexValidator
+import uuid
 
 class Volunteer(models.Model):
-    SEX_CHOICES = [('M', 'Masculino'), ('F', 'Femenino')]
+    # Generamos UUID por si no traen CURP, para tener algo único interno
+    id = models.BigAutoField(primary_key=True)
     
-    MANUAL_STATUS_CHOICES = [
-        ('waiting_approval', 'En espera por aprobación'),
-        ('eligible', 'Apto'),
-        ('rejected', 'Rechazado'),
-    ]
-
-    code = models.CharField(max_length=20, unique=True, editable=False)
+    # CÓDIGO: Ahora editable para poder importarlo, pero se autogenera si viene vacío
+    code = models.CharField(max_length=20, unique=True, blank=True, null=True)
+    
     first_name = models.CharField(max_length=100)
     middle_name = models.CharField(max_length=100, blank=True, null=True)
     last_name_paternal = models.CharField(max_length=100)
-    last_name_maternal = models.CharField(max_length=100)
     
-    # NUEVO CAMPO
-    birth_date = models.DateField(verbose_name="Fecha de Nacimiento", null=True, blank=True)
+    # CAMPOS OPCIONALES (null=True, blank=True)
+    last_name_maternal = models.CharField(max_length=100, blank=True, null=True)
     
-    sex = models.CharField(max_length=1, choices=SEX_CHOICES)
-    phone = models.CharField(max_length=20)
+    # La fecha puede ser nula
+    birth_date = models.DateField(blank=True, null=True)
+    
+    SEX_CHOICES = [('M', 'Masculino'), ('F', 'Femenino')]
+    sex = models.CharField(max_length=1, choices=SEX_CHOICES, blank=True, null=True)
+    
+    # CURP opcional, pero si la ponen debe ser única
     curp = models.CharField(
         max_length=18, 
         unique=True, 
-        verbose_name="CURP",
-        error_messages={'unique': "Ya existe un voluntario registrado con esta CURP."}
+        blank=True, 
+        null=True,
+        validators=[RegexValidator(r'^[A-Z]{4}\d{6}[HM][A-Z]{5}[0-9A-Z]\d$', 'Formato CURP inválido')]
     )
     
-    manual_status = models.CharField(
-        max_length=20, 
-        choices=MANUAL_STATUS_CHOICES, 
-        default='waiting_approval',
-        verbose_name="Estatus Administrativo"
-    )
-    status_reason = models.TextField(blank=True, verbose_name="Motivo del Estatus")
-
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    
+    STATUS_CHOICES = [
+        ('waiting_approval', 'En espera por aprobación'),
+        ('eligible', 'Apto'),
+        ('rejected', 'Rechazado'),
+        ('age_mismatch', 'No elegible por edad'),
+        ('in_study', 'En estudio'),
+        ('study_assigned', 'Estudio asignado'),
+        ('standby', 'En espera (Descanso)'),
+    ]
+    manual_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting_approval')
+    status_reason = models.TextField(blank=True, null=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
+        # Lógica para autogenerar código SOLO si no se proporcionó uno
         if not self.code:
-            self.code = self.generate_code()
+            year_suffix = str(self.created_at.year)[-2:] if self.created_at else '26'
+            # Buscamos el último consecutivo de ese año
+            last = Volunteer.objects.filter(code__endswith=f"-{year_suffix}").count() + 1
+            self.code = f"V-{year_suffix}-{last:04d}"
+            
         super().save(*args, **kwargs)
 
-    def generate_code(self):
-        initials = (self.first_name[0] + self.last_name_paternal[0] + self.last_name_maternal[0]).upper()
-        year = datetime.date.today().year
-        count = Volunteer.objects.filter(created_at__year=year).count() + 1
-        return f"{initials}-{year}-{count:04d}"
-    
+    def __str__(self):
+        return f"{self.first_name} {self.last_name_paternal} ({self.code})"
+
     @property
     def full_name(self):
-         return f"{self.first_name} {self.last_name_paternal} {self.last_name_maternal}"
+        return f"{self.first_name} {self.middle_name or ''} {self.last_name_paternal} {self.last_name_maternal or ''}".strip()
 
-    # Helper para calcular edad
+    @property
+    def status(self):
+        return self.get_manual_status_display()
+        
     @property
     def age(self):
         if not self.birth_date:
-            return 0
-        today = datetime.date.today()
+            return None
+        from datetime import date
+        today = date.today()
         return today.year - self.birth_date.year - ((today.month, today.day) < (self.birth_date.month, self.birth_date.day))
 
-# (El modelo Participation queda igual, no es necesario tocarlo)
 class Participation(models.Model):
-    volunteer = models.ForeignKey(Volunteer, on_delete=models.CASCADE, related_name='participations')
-    study = models.ForeignKey(Study, on_delete=models.PROTECT, related_name='participants')
-
-    def clean(self):
-        active_participations = Participation.objects.filter(
-            volunteer=self.volunteer,
-            study__is_active=True
-        ).exclude(pk=self.pk) 
-
-        if active_participations.exists():
-            raise ValidationError(f"El voluntario ya está participando en el estudio vigente: {active_participations.first().study.name}")
-
-        last_paid_participation = Participation.objects.filter(
-            volunteer=self.volunteer,
-            study__payment_date__isnull=False
-        ).order_by('-study__payment_date').first()
-
-        if last_paid_participation:
-            last_payment = last_paid_participation.study.payment_date
-            three_months_later = last_payment + datetime.timedelta(days=90)
-            
-            if datetime.date.today() < three_months_later:
-                raise ValidationError(
-                    f"No apto. Su último estudio ({last_paid_participation.study.name}) se pagó el {last_payment}. "
-                    f"Disponible a partir del: {three_months_later}."
-                )
+    volunteer = models.ForeignKey(Volunteer, related_name='participations', on_delete=models.CASCADE)
+    study = models.ForeignKey('studies.Study', on_delete=models.CASCADE)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.volunteer.code} - {self.study.name}"
+    
+    @property
+    def study_name(self):
+        return self.study.name
