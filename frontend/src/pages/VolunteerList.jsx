@@ -1,9 +1,8 @@
-import { useEffect, useState, useContext, useMemo } from "react";
+import { useEffect, useState, useContext, useMemo, useCallback } from "react";
 import api from "../api/axios";
-import { Edit, Plus, Eye } from "lucide-react";
+import { Edit, Plus, Eye, Upload, FileSpreadsheet } from "lucide-react";
 import SmartTable from "../components/SmartTable";
 import { AuthContext } from "../context/AuthContext";
-import Modal from "../components/Modal";
 import VolunteerForm from "./VolunteerForm";
 
 const VolunteerList = () => {
@@ -16,8 +15,47 @@ const VolunteerList = () => {
   const [selectedVolunteerId, setSelectedVolunteerId] = useState(null);
   const [isViewMode, setIsViewMode] = useState(false);
 
-  const fetchVolunteers = async () => {
-    if (!isModalOpen) setLoading(true);
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    setLoading(true); // Bloqueamos pantalla
+    try {
+      const res = await api.post("volunteers/import/", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      let msg = res.data.message;
+      if (res.data.errors && res.data.errors.length > 0) {
+        msg +=
+          "\n\nAdvertencias:\n" +
+          res.data.errors.slice(0, 5).join("\n") +
+          (res.data.errors.length > 5 ? "\n..." : "");
+      }
+
+      alert(msg);
+      fetchVolunteers(false); // Recargar lista
+    } catch (error) {
+      console.error(error);
+      alert(
+        "Error al importar: " +
+          (error.response?.data?.error || "Error desconocido"),
+      );
+    } finally {
+      setLoading(false);
+      e.target.value = null; // Limpiar input para poder subir el mismo archivo si es necesario
+    }
+  };
+  // --- FUNCIÓN DE CARGA MODIFICADA PARA AUTO-REFRESCO ---
+  // Acepta 'isBackground' para saber si es una actualización silenciosa
+  const fetchVolunteers = useCallback(async (isBackground = false) => {
+    // Solo mostramos el spinner de carga si NO es segundo plano
+    if (!isBackground) setLoading(true);
 
     try {
       const res = await api.get("volunteers/");
@@ -28,24 +66,36 @@ const VolunteerList = () => {
         study_names_filter: v.participations?.map((p) => p.study_name) || [],
         status_filter: v.status,
 
-        // RECUPERADO: Fecha de registro formateada
         creation_date_fmt: new Date(v.created_at).toLocaleDateString(),
-        // Auxiliares para filtrado por año
         creation_year_filter: new Date(v.created_at).getFullYear().toString(),
         code_year_filter: v.code.split("-")[1] || "",
         code_number_sort: parseInt(v.code.split("-")[2] || 0),
       }));
+
+      // Actualizamos los datos (React detectará si hay cambios y repintará la tabla)
       setVolunteers(processedData);
     } catch (error) {
       console.error("Error cargando voluntarios", error);
     } finally {
-      setLoading(false);
+      // Solo desactivamos el loading si NO fue en segundo plano
+      if (!isBackground) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchVolunteers();
   }, []);
+
+  // --- EFECTO PARA EL AUTO-REFRESCO (POLLING) ---
+  useEffect(() => {
+    // 1. Carga inicial normal (muestra cargando)
+    fetchVolunteers(false);
+
+    // 2. Configurar el intervalo para actualizar cada 5 segundos
+    const intervalId = setInterval(() => {
+      // Llamamos en modo 'background' para que no parpadee la pantalla
+      fetchVolunteers(true);
+    }, 5000); // 5000 ms = 5 segundos
+
+    // 3. Limpieza: Detener el reloj cuando el usuario salga de esta pantalla
+    return () => clearInterval(intervalId);
+  }, [fetchVolunteers]);
 
   const handleCreate = () => {
     setSelectedVolunteerId(null);
@@ -66,9 +116,11 @@ const VolunteerList = () => {
     setIsModalOpen(false);
     setSelectedVolunteerId(null);
   };
+
+  // Al guardar exitosamente, forzamos una recarga inmediata
   const handleSuccess = () => {
     handleCloseModal();
-    fetchVolunteers();
+    fetchVolunteers(false); // Refresco inmediato visual
     alert("Operación realizada con éxito");
   };
 
@@ -99,12 +151,11 @@ const VolunteerList = () => {
     "En espera (Descanso)",
   ];
 
-  // COLUMNAS CON ANCHOS OPTIMIZADOS PARA EVITAR SCROLL
   const columns = [
     {
       key: "code",
       label: "Código",
-      width: "130px", // Reducido
+      width: "130px",
       sortable: true,
       filterKey: "code_year_filter",
       filterOptions: yearOptions,
@@ -120,16 +171,15 @@ const VolunteerList = () => {
     {
       key: "full_name_search",
       label: "Nombre Completo",
-      width: "220px", // Reducido de 250
+      width: "220px",
       sortable: true,
     },
     {
       key: "history",
       label: "Historial Estudios",
-      width: "220px", // Reducido de 300, se ajustará el wrap
+      width: "220px",
       filterKey: "study_names_filter",
       filterOptions: studyOptions,
-      defaultHidden: true, // Oculto por defecto
       render: (row) => (
         <div className="flex flex-wrap gap-1">
           {row.participations && row.participations.length > 0 ? (
@@ -150,7 +200,7 @@ const VolunteerList = () => {
     {
       key: "active_study",
       label: "Estudio Actual",
-      width: "150px", // Reducido
+      width: "150px",
       render: (row) =>
         row.active_study ? (
           <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-bold">
@@ -164,7 +214,7 @@ const VolunteerList = () => {
       key: "last_study",
       label: "Último Estudio",
       width: "150px",
-
+      defaultHidden: true,
       render: (row) => (
         <span className="text-gray-600 text-sm italic">{row.last_study}</span>
       ),
@@ -173,7 +223,7 @@ const VolunteerList = () => {
       key: "creation_date_fmt",
       label: "F. Registro",
       width: "110px",
-      defaultHidden: true, // Oculto por defecto
+      defaultHidden: true,
       sortable: true,
       render: (row) => row.creation_date_fmt,
     },
@@ -191,7 +241,7 @@ const VolunteerList = () => {
     {
       key: "status_filter",
       label: "Estatus",
-      width: "140px", // Reducido
+      width: "140px",
       filterKey: "status_filter",
       filterOptions: statusOptions,
       render: (row) => {
@@ -258,12 +308,33 @@ const VolunteerList = () => {
         columns={columns}
         actions={
           user?.isAdmin ? (
-            <button
-              onClick={handleCreate}
-              className="bg-primary text-white px-4 py-2 rounded flex items-center hover:bg-blue-800 transition-colors"
-            >
-              <Plus size={18} className="mr-2" /> Nuevo
-            </button>
+            <div className="flex gap-2">
+              {/* INPUT OCULTO */}
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                id="excel-upload"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+
+              {/* BOTÓN DE IMPORTAR */}
+              <button
+                onClick={() => document.getElementById("excel-upload").click()}
+                className="bg-green-600 text-white px-4 py-2 rounded flex items-center hover:bg-green-700 transition-colors"
+                title="Importar Excel"
+              >
+                <FileSpreadsheet size={18} className="mr-2" /> Importar
+              </button>
+
+              {/* BOTÓN DE NUEVO (YA EXISTÍA) */}
+              <button
+                onClick={handleCreate}
+                className="bg-primary text-white px-4 py-2 rounded flex items-center hover:bg-blue-800 transition-colors"
+              >
+                <Plus size={18} className="mr-2" /> Nuevo
+              </button>
+            </div>
           ) : null
         }
       />
@@ -291,7 +362,7 @@ const VolunteerList = () => {
                 onClose={handleCloseModal}
                 onSuccess={handleSuccess}
                 readOnlyMode={isViewMode}
-                onParticipationChange={fetchVolunteers}
+                onParticipationChange={() => fetchVolunteers(false)}
               />
             </div>
           </div>

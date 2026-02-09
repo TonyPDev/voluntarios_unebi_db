@@ -170,13 +170,15 @@ const VolunteerForm = ({
 
           {/* Fecha de Nacimiento con DatePicker */}
           <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Fecha de nacimiento
+            </label>
             <Controller
               control={control}
               name="birth_date"
               rules={{ required: !isReadOnly }}
               render={({ field }) => (
                 <CustomDatePicker
-                  label="Fecha de Nacimiento"
                   selectedDate={field.value}
                   onChange={field.onChange}
                   disabled={isReadOnly}
