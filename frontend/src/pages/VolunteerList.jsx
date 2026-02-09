@@ -129,6 +129,7 @@ const VolunteerList = () => {
       width: "220px", // Reducido de 300, se ajustará el wrap
       filterKey: "study_names_filter",
       filterOptions: studyOptions,
+      defaultHidden: true, // Oculto por defecto
       render: (row) => (
         <div className="flex flex-wrap gap-1">
           {row.participations && row.participations.length > 0 ? (
@@ -163,7 +164,7 @@ const VolunteerList = () => {
       key: "last_study",
       label: "Último Estudio",
       width: "150px",
-      defaultHidden: true, // Oculto por defecto
+
       render: (row) => (
         <span className="text-gray-600 text-sm italic">{row.last_study}</span>
       ),

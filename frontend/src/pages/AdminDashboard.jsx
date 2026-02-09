@@ -151,35 +151,84 @@ const AdminDashboard = () => {
   const formatChanges = (changes) => {
     if (!changes || Object.keys(changes).length === 0)
       return <span className="text-gray-400">Sin detalles</span>;
+
+    // 1. Diccionario Completo de Campos (Traducción de Keys)
     const fieldMap = {
+      // Estudios
       name: "Nombre",
       description: "Descripción",
       admission_date: "F. Internamiento",
       payment_date: "F. Pago",
       is_active: "Vigente",
+
+      // Voluntarios
+      first_name: "Primer Nombre",
+      middle_name: "Segundo Nombre",
+      last_name_paternal: "Apellido Paterno",
+      last_name_maternal: "Apellido Materno",
+      birth_date: "Fecha de Nacimiento",
+      sex: "Sexo",
+      phone: "Teléfono",
+      curp: "CURP",
+      manual_status: "Estatus Administrativo",
+      status_reason: "Motivo del Estatus",
+      initial_study_id: "Estudio Inicial",
+      justification: "Justificación",
+    };
+
+    // 2. Función auxiliar para traducir Valores específicos
+    const formatValue = (key, value) => {
+      if (value === null || value === undefined || value === "") return "Vacío";
+
+      // Traducir Estatus Administrativo
+      if (key === "manual_status") {
+        const statusMap = {
+          waiting_approval: "En espera por aprobación",
+          eligible: "Apto",
+          rejected: "Rechazado",
+        };
+        return statusMap[value] || value;
+      }
+
+      // Traducir Sexo
+      if (key === "sex") {
+        return value === "M" ? "Masculino" : value === "F" ? "Femenino" : value;
+      }
+
+      // Traducir Booleanos (True/False -> Sí/No)
+      if (key === "is_active" || typeof value === "boolean") {
+        return value ? "Sí" : "No";
+      }
+
+      return String(value);
     };
 
     return (
       <div className="space-y-1">
         {Object.entries(changes).map(([key, val], idx) => {
-          const fieldName = fieldMap[key] || key;
+          // Usamos el nombre traducido o la llave original capitalizada si no existe
+          const fieldName =
+            fieldMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
+
           if (val && typeof val === "object" && "to" in val) {
             return (
               <div key={idx} className="text-xs">
-                <span className="font-bold">{fieldName}:</span>{" "}
-                <span className="text-red-600 line-through">
-                  {String(val.from)}
+                <span className="font-bold text-gray-700">{fieldName}:</span>{" "}
+                <span className="text-red-500 line-through mr-1 opacity-70">
+                  {formatValue(key, val.from)}
                 </span>{" "}
-                ➔{" "}
-                <span className="text-green-600 font-medium">
-                  {String(val.to)}
+                <span className="text-gray-400">➔</span>{" "}
+                <span className="text-green-700 font-semibold">
+                  {formatValue(key, val.to)}
                 </span>
               </div>
             );
           }
+          // Caso para logs manuales simples
           return (
             <div key={idx} className="text-xs">
-              <span className="font-bold">{fieldName}:</span> {String(val)}
+              <span className="font-bold text-gray-700">{fieldName}:</span>{" "}
+              <span>{String(val)}</span>
             </div>
           );
         })}
@@ -471,13 +520,24 @@ const AdminDashboard = () => {
               className="w-full p-2 border rounded"
             />
           </div>
-          <div className="flex items-center p-2 bg-gray-50 rounded">
+          <div className="flex items-center bg-blue-50 p-4 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer">
             <input
               type="checkbox"
+              id="is_staff_check"
               {...registerUser("is_staff")}
-              className="mr-2"
-            />{" "}
-            <label>Es Administrador</label>
+              className="w-5 h-5 text-primary border-gray-300 rounded focus:ring-primary mr-3 cursor-pointer"
+            />
+            <div className="flex flex-col">
+              <label
+                htmlFor="is_staff_check"
+                className="text-sm font-bold text-blue-900 cursor-pointer select-none"
+              >
+                Permisos de Administrador
+              </label>
+              <span className="text-xs text-blue-700">
+                Permite gestionar usuarios, ver auditoría y editar catálogos.
+              </span>
+            </div>
           </div>
           <button
             type="submit"
