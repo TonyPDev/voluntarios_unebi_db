@@ -1,374 +1,426 @@
-import { useEffect, useState, useContext, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useContext } from "react";
+import AuthContext from "../context/AuthContext";
 import api from "../api/axios";
-import { Edit, Plus, Eye, Upload, FileSpreadsheet } from "lucide-react";
+
+// Componentes
 import SmartTable from "../components/SmartTable";
-import { AuthContext } from "../context/AuthContext";
+import Modal from "../components/Modal";
 import VolunteerForm from "./VolunteerForm";
+import ParticipationManager from "../components/ParticipationManager";
+
+// Iconos (Asegúrate de instalarlos: npm install lucide-react)
+import {
+  Users,
+  UserCheck,
+  FlaskConical,
+  Clock,
+  Plus,
+  FileSpreadsheet,
+  Eye,
+  Edit,
+  Trash2,
+  MoreHorizontal,
+} from "lucide-react";
 
 const VolunteerList = () => {
   const { user } = useContext(AuthContext);
+
+  // --- Estados ---
   const [volunteers, setVolunteers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // ESTADOS PARA EL MODAL
+  // Estados de Modales
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedVolunteerId, setSelectedVolunteerId] = useState(null);
-  const [isViewMode, setIsViewMode] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [selectedVolunteer, setSelectedVolunteer] = useState(null);
+  const [showParticipations, setShowParticipations] = useState(null);
+
+  // ESTADO NUEVO: Filtro Rápido (Tabs)
+  const [quickFilter, setQuickFilter] = useState("todos");
+
+  // Carga inicial
+  useEffect(() => {
+    fetchVolunteers();
+  }, []);
+
+  const fetchVolunteers = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get("/volunteers/");
+      setVolunteers(response.data);
+    } catch (error) {
+      console.error("Error fetching volunteers:", error);
+      alert("Error al cargar voluntarios");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Lógica de Acciones ---
+  const handleCreate = () => {
+    setSelectedVolunteer(null);
+    setIsModalOpen(true);
+  };
+
+  const handleEdit = (volunteer) => {
+    setSelectedVolunteer(volunteer);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = (shouldRefresh) => {
+    setIsModalOpen(false);
+    setSelectedVolunteer(null);
+    if (shouldRefresh) fetchVolunteers();
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("¿Estás seguro de eliminar este voluntario?")) {
+      try {
+        await api.delete(`/volunteers/${id}/`);
+        fetchVolunteers();
+      } catch (error) {
+        console.error("Error deleting volunteer:", error);
+        alert("Error al eliminar");
+      }
+    }
+  };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const formData = new FormData();
     formData.append("file", file);
-
-    setLoading(true); // Bloqueamos pantalla
     try {
-      const res = await api.post("volunteers/import/", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+      await api.post("/volunteers/import/", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
       });
-
-      let msg = res.data.message;
-      if (res.data.errors && res.data.errors.length > 0) {
-        msg +=
-          "\n\nAdvertencias:\n" +
-          res.data.errors.slice(0, 5).join("\n") +
-          (res.data.errors.length > 5 ? "\n..." : "");
-      }
-
-      alert(msg);
-      fetchVolunteers(false); // Recargar lista
+      alert("Importación exitosa");
+      fetchVolunteers();
     } catch (error) {
-      console.error(error);
-      alert(
-        "Error al importar: " +
-          (error.response?.data?.error || "Error desconocido"),
-      );
-    } finally {
-      setLoading(false);
-      e.target.value = null; // Limpiar input para poder subir el mismo archivo si es necesario
+      console.error("Import error:", error);
+      alert("Error en la importación");
     }
   };
-  // --- FUNCIÓN DE CARGA MODIFICADA PARA AUTO-REFRESCO ---
-  // Acepta 'isBackground' para saber si es una actualización silenciosa
-  const fetchVolunteers = useCallback(async (isBackground = false) => {
-    // Solo mostramos el spinner de carga si NO es segundo plano
-    if (!isBackground) setLoading(true);
 
-    try {
-      const res = await api.get("volunteers/");
-      const processedData = res.data.map((v) => ({
-        ...v,
-        full_name_search:
-          `${v.first_name} ${v.middle_name || ""} ${v.last_name_paternal} ${v.last_name_maternal}`.trim(),
-        study_names_filter: v.participations?.map((p) => p.study_name) || [],
-        status_filter: v.status,
+  // --- LÓGICA DE FILTRADO RÁPIDO (TABS) ---
+  const filteredVolunteers = useMemo(() => {
+    if (quickFilter === "todos") return volunteers;
 
-        creation_date_fmt: new Date(v.created_at).toLocaleDateString(),
-        creation_year_filter: new Date(v.created_at).getFullYear().toString(),
-        code_year_filter: v.code.split("-")[1] || "",
-        code_number_sort: parseInt(v.code.split("-")[2] || 0),
-      }));
-
-      // Actualizamos los datos (React detectará si hay cambios y repintará la tabla)
-      setVolunteers(processedData);
-    } catch (error) {
-      console.error("Error cargando voluntarios", error);
-    } finally {
-      // Solo desactivamos el loading si NO fue en segundo plano
-      if (!isBackground) setLoading(false);
-    }
-  }, []);
-
-  // --- EFECTO PARA EL AUTO-REFRESCO (POLLING) ---
-  useEffect(() => {
-    // 1. Carga inicial normal (muestra cargando)
-    fetchVolunteers(false);
-
-    // 2. Configurar el intervalo para actualizar cada 5 segundos
-    const intervalId = setInterval(() => {
-      // Llamamos en modo 'background' para que no parpadee la pantalla
-      fetchVolunteers(true);
-    }, 5000); // 5000 ms = 5 segundos
-
-    // 3. Limpieza: Detener el reloj cuando el usuario salga de esta pantalla
-    return () => clearInterval(intervalId);
-  }, [fetchVolunteers]);
-
-  const handleCreate = () => {
-    setSelectedVolunteerId(null);
-    setIsViewMode(false);
-    setIsModalOpen(true);
-  };
-  const handleEdit = (id) => {
-    setSelectedVolunteerId(id);
-    setIsViewMode(false);
-    setIsModalOpen(true);
-  };
-  const handleView = (id) => {
-    setSelectedVolunteerId(id);
-    setIsViewMode(true);
-    setIsModalOpen(true);
-  };
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedVolunteerId(null);
-  };
-
-  // Al guardar exitosamente, forzamos una recarga inmediata
-  const handleSuccess = () => {
-    handleCloseModal();
-    fetchVolunteers(false); // Refresco inmediato visual
-    alert("Operación realizada con éxito");
-  };
-
-  const studyOptions = useMemo(() => {
-    const options = new Set();
-    volunteers.forEach((v) =>
-      v.study_names_filter?.forEach((name) => options.add(name)),
-    );
-    return Array.from(options).sort();
-  }, [volunteers]);
-
-  const yearOptions = useMemo(() => {
-    const options = new Set();
-    volunteers.forEach((v) => {
-      if (v.creation_year_filter) options.add(v.creation_year_filter);
-      if (v.code_year_filter) options.add(v.code_year_filter);
+    return volunteers.filter((v) => {
+      const status = v.status || "";
+      if (quickFilter === "aptos") return status === "Apto";
+      if (quickFilter === "estudio")
+        return status.includes("estudio") || status.includes("Estudio");
+      if (quickFilter === "pendientes")
+        return status.includes("espera") || status.includes("approbación");
+      return true;
     });
-    return Array.from(options).sort().reverse();
-  }, [volunteers]);
+  }, [volunteers, quickFilter]);
 
-  const statusOptions = [
-    "En espera por aprobación",
-    "Apto",
-    "Rechazado",
-    "No elegible por edad",
-    "En estudio",
-    "Estudio asignado",
-    "En espera (Descanso)",
-  ];
+  // Conteos para las pestañas
+  const counts = useMemo(
+    () => ({
+      todos: volunteers.length,
+      aptos: volunteers.filter((v) => v.status === "Apto").length,
+      estudio: volunteers.filter((v) =>
+        (v.status || "").toLowerCase().includes("estudio"),
+      ).length,
+      pendientes: volunteers.filter((v) =>
+        (v.status || "").toLowerCase().includes("espera"),
+      ).length,
+    }),
+    [volunteers],
+  );
 
-  const columns = [
-    {
-      key: "code",
-      label: "Código",
-      width: "130px",
-      sortable: true,
-      filterKey: "code_year_filter",
-      filterOptions: yearOptions,
-      customSort: (a, b) => {
-        if (a.code_year_filter !== b.code_year_filter)
-          return b.code_year_filter.localeCompare(a.code_year_filter);
-        return a.code_number_sort - b.code_number_sort;
+  // Componente de Pestaña Individual
+  const FilterTab = ({ id, label, icon: Icon, colorClass, count }) => (
+    <button
+      onClick={() => setQuickFilter(id)}
+      className={`
+        relative flex items-center gap-2 px-5 py-3 transition-all font-medium text-sm border-b-2
+        ${
+          quickFilter === id
+            ? `border-${colorClass} text-${colorClass} bg-${colorClass}/5`
+            : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+        }
+      `}
+    >
+      <Icon size={16} />
+      {label}
+      <span
+        className={`ml-1 text-xs px-2 py-0.5 rounded-full ${quickFilter === id ? "bg-white shadow-sm border" : "bg-gray-100 text-gray-500"}`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+
+  // --- Definición de Columnas ---
+  const columns = useMemo(
+    () => [
+      {
+        key: "code",
+        label: "Código",
+        sortable: true,
+        width: 120,
+        filterKey: "code",
+        filterOptions: [],
       },
-      render: (row) => (
-        <span className="font-mono font-bold text-primary">{row.code}</span>
-      ),
-    },
-    {
-      key: "full_name_search",
-      label: "Nombre Completo",
-      width: "220px",
-      sortable: true,
-    },
-    {
-      key: "history",
-      label: "Historial Estudios",
-      width: "220px",
-      filterKey: "study_names_filter",
-      filterOptions: studyOptions,
-      render: (row) => (
-        <div className="flex flex-wrap gap-1">
-          {row.participations && row.participations.length > 0 ? (
-            row.participations.map((p, index) => (
-              <span
-                key={index}
-                className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded border border-gray-200 truncate max-w-[100px]"
-              >
-                {p.study_name}
-              </span>
-            ))
-          ) : (
-            <span className="text-gray-400 text-xs italic">Sin historial</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "active_study",
-      label: "Estudio Actual",
-      width: "150px",
-      render: (row) =>
-        row.active_study ? (
-          <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-bold">
-            {row.active_study}
-          </span>
-        ) : (
-          <span className="text-gray-400 text-sm">-</span>
+      {
+        key: "full_name",
+        label: "Nombre Completo",
+        sortable: true,
+        width: 250,
+        filterKey: "full_name",
+        filterOptions: [], // Podrías poblar esto dinámicamente si quisieras
+        render: (row) => (
+          <div className="font-medium text-gray-900">{row.full_name}</div>
         ),
-    },
-    {
-      key: "last_study",
-      label: "Último Estudio",
-      width: "150px",
-      defaultHidden: true,
-      render: (row) => (
-        <span className="text-gray-600 text-sm italic">{row.last_study}</span>
-      ),
-    },
-    {
-      key: "creation_date_fmt",
-      label: "F. Registro",
-      width: "110px",
-      defaultHidden: true,
-      sortable: true,
-      render: (row) => row.creation_date_fmt,
-    },
-    {
-      key: "age",
-      label: "Edad",
-      width: "70px",
-      sortable: true,
-      render: (row) => (
-        <span className="text-gray-700 text-sm">{row.age || "-"}</span>
-      ),
-    },
-    { key: "curp", label: "CURP", width: "170px" },
-    { key: "phone", label: "Teléfono", width: "110px" },
-    {
-      key: "status_filter",
-      label: "Estatus",
-      width: "140px",
-      filterKey: "status_filter",
-      filterOptions: statusOptions,
-      render: (row) => {
-        const colors = {
-          Apto: "bg-green-100 text-green-800 border-green-200",
-          "En espera por aprobación":
-            "bg-gray-100 text-gray-800 border-gray-200",
-          "En espera (Descanso)":
-            "bg-orange-100 text-orange-800 border-orange-200",
-          "En estudio": "bg-blue-100 text-blue-800 border-blue-200",
-          "Estudio asignado": "bg-indigo-100 text-indigo-800 border-indigo-200",
-          Rechazado: "bg-red-100 text-red-800 border-red-200",
-          "No elegible por edad": "bg-gray-200 text-gray-600 border-gray-300",
-        };
-        return (
-          <span
-            className={`font-bold text-xs px-2 py-1 rounded-full border truncate block text-center ${colors[row.status] || "bg-gray-100 text-gray-800"}`}
-            title={row.status}
-          >
-            {row.status}
-          </span>
-        );
       },
-    },
-    {
-      key: "actions",
-      label: "Acciones",
-      width: "90px",
-      render: (row) => (
-        <div className="flex items-center space-x-2 justify-center">
-          <button
-            onClick={() => handleView(row.id)}
-            className="text-gray-500 hover:text-blue-600 transition-colors"
-            title="Ver Detalles"
-          >
-            <Eye size={18} />
-          </button>
-          {user?.isAdmin && (
+      {
+        key: "age",
+        label: "Edad",
+        sortable: true,
+        width: 80,
+        render: (row) => (row.age ? `${row.age} años` : "-"),
+      },
+      {
+        key: "sex",
+        label: "Sexo",
+        sortable: true,
+        width: 80,
+        filterKey: "sex",
+        filterOptions: ["M", "F"],
+      },
+      { key: "phone", label: "Teléfono", width: 120 },
+      {
+        key: "status",
+        label: "Estatus",
+        sortable: true,
+        width: 180,
+        filterKey: "status",
+        filterOptions: [
+          "Apto",
+          "No elegible por edad",
+          "En espera (Descanso)",
+          "En estudio",
+          "En espera por aprobación",
+        ],
+        render: (row) => {
+          let color = "bg-gray-100 text-gray-700 border-gray-200";
+          const s = row.status || "";
+
+          if (s === "Apto")
+            color = "bg-green-50 text-green-700 border-green-200";
+          else if (s.includes("No elegible") || s.includes("Rechazado"))
+            color = "bg-red-50 text-red-700 border-red-200";
+          else if (s.includes("estudio") || s.includes("Estudio"))
+            color = "bg-blue-50 text-blue-700 border-blue-200";
+          else if (s.includes("espera"))
+            color = "bg-orange-50 text-orange-700 border-orange-200";
+
+          return (
+            <span
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border ${color}`}
+            >
+              {s}
+            </span>
+          );
+        },
+      },
+      {
+        key: "actions",
+        label: "Acciones",
+        width: 140,
+        render: (row) => (
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => handleEdit(row.id)}
-              className="text-gray-500 hover:text-primary transition-colors"
+              onClick={() => handleEdit(row)}
+              className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
               title="Editar"
             >
-              <Edit size={18} />
+              <Edit size={16} />
             </button>
-          )}
-        </div>
-      ),
-    },
-  ];
+            <button
+              onClick={() => setShowParticipations(row)}
+              className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+              title="Ver Participaciones"
+            >
+              <FlaskConical size={16} />
+            </button>
+            {user?.isAdmin && (
+              <button
+                onClick={() => handleDelete(row.id)}
+                className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                title="Eliminar"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
+        ),
+      },
+    ],
+    [user],
+  );
 
-  if (loading && !isModalOpen)
+  if (loading)
     return (
-      <div className="p-8 text-center text-gray-500">
-        Cargando directorio...
+      <div className="flex h-full items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
 
   return (
-    <>
-      <SmartTable
-        title="Directorio de Voluntarios"
-        data={volunteers}
-        columns={columns}
-        actions={
-          user?.isAdmin ? (
-            <div className="flex gap-2">
-              {/* INPUT OCULTO */}
-              <input
-                type="file"
-                accept=".xlsx, .xls"
-                id="excel-upload"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
+    <div className="h-full flex flex-col gap-6 animate-fade-in">
+      {/* 1. SECCIÓN DE CABECERA Y FILTROS RÁPIDOS */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">
+              Directorio de Voluntarios
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Gestiona, filtra y exporta la información de los participantes
+              clínicos.
+            </p>
+          </div>
+          {/* Estadísticas rápidas opcionales */}
+          <div className="hidden md:flex gap-4 text-sm text-gray-500">
+            <div className="text-right">
+              <div className="font-bold text-gray-800 text-lg">
+                {counts.todos}
+              </div>
+              <div className="text-xs uppercase tracking-wide">Total</div>
+            </div>
+            <div className="w-px bg-gray-200 h-10"></div>
+            <div className="text-right">
+              <div className="font-bold text-green-600 text-lg">
+                {counts.aptos}
+              </div>
+              <div className="text-xs uppercase tracking-wide">Aptos</div>
+            </div>
+          </div>
+        </div>
 
-              {/* BOTÓN DE IMPORTAR */}
-              <button
-                onClick={() => document.getElementById("excel-upload").click()}
-                className="bg-green-600 text-white px-4 py-2 rounded flex items-center hover:bg-green-700 transition-colors"
-                title="Importar Excel"
-              >
-                <FileSpreadsheet size={18} className="mr-2" /> Importar
-              </button>
+        {/* TABS DE NAVEGACIÓN */}
+        <div className="flex overflow-x-auto bg-white px-2">
+          <FilterTab
+            id="todos"
+            label="Todos"
+            icon={Users}
+            colorClass="blue-600"
+            count={counts.todos}
+          />
+          <FilterTab
+            id="aptos"
+            label="Aptos"
+            icon={UserCheck}
+            colorClass="green-600"
+            count={counts.aptos}
+          />
+          <FilterTab
+            id="estudio"
+            label="En Estudio"
+            icon={FlaskConical}
+            colorClass="indigo-600"
+            count={counts.estudio}
+          />
+          <FilterTab
+            id="pendientes"
+            label="Pendientes"
+            icon={Clock}
+            colorClass="orange-500"
+            count={counts.pendientes}
+          />
+        </div>
+      </div>
 
-              {/* BOTÓN DE NUEVO (YA EXISTÍA) */}
+      {/* 2. TABLA INTELIGENTE */}
+      <div className="flex-1 min-h-0 shadow-sm rounded-xl overflow-hidden">
+        <SmartTable
+          title={
+            quickFilter === "todos"
+              ? "Base de Datos Completa"
+              : quickFilter === "aptos"
+                ? "Voluntarios Aptos"
+                : quickFilter === "estudio"
+                  ? "Voluntarios en Estudio Activo"
+                  : "Pendientes de Aprobación"
+          }
+          data={filteredVolunteers}
+          columns={columns}
+          actions={
+            user?.isAdmin ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  id="excel-upload"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+
+                {/* Botón Importar */}
+                <button
+                  onClick={() =>
+                    document.getElementById("excel-upload").click()
+                  }
+                  className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-green-700 hover:border-green-300 transition-all shadow-sm text-sm font-medium"
+                >
+                  <FileSpreadsheet size={16} className="text-green-600" />
+                  <span className="hidden sm:inline">Importar Excel</span>
+                </button>
+
+                {/* Botón Nuevo Voluntario (Destacado) */}
+                <button
+                  onClick={handleCreate}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md shadow-blue-600/20 transition-all transform active:scale-95 text-sm font-bold"
+                >
+                  <Plus size={18} />
+                  <span>Nuevo Voluntario</span>
+                </button>
+              </div>
+            ) : null
+          }
+        />
+      </div>
+
+      {/* 3. MODALES */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => handleCloseModal(false)}
+        title={selectedVolunteer ? "Editar Voluntario" : "Nuevo Voluntario"}
+      >
+        <VolunteerForm
+          volunteerToEdit={selectedVolunteer}
+          onSuccess={() => handleCloseModal(true)}
+          onCancel={() => handleCloseModal(false)}
+        />
+      </Modal>
+
+      {/* Modal de Participaciones (Drawer lateral o Modal centrado) */}
+      {showParticipations && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex justify-end">
+          <div className="w-full max-w-2xl bg-white h-full shadow-2xl animate-slide-in-right overflow-y-auto">
+            <div className="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+              <h2 className="text-lg font-bold">
+                Historial de Estudios: {showParticipations.code}
+              </h2>
               <button
-                onClick={handleCreate}
-                className="bg-primary text-white px-4 py-2 rounded flex items-center hover:bg-blue-800 transition-colors"
+                onClick={() => setShowParticipations(null)}
+                className="p-2 hover:bg-gray-100 rounded-full"
               >
-                <Plus size={18} className="mr-2" /> Nuevo
+                <X size={20} />
               </button>
             </div>
-          ) : null
-        }
-      />
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 animate-fade-in overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl my-8 relative">
-            <div className="flex justify-between items-center px-6 py-4 border-b bg-gray-50 rounded-t-lg">
-              <h3 className="text-lg font-bold text-gray-800">
-                {selectedVolunteerId
-                  ? isViewMode
-                    ? "Detalles del Voluntario"
-                    : "Editar Voluntario"
-                  : "Registrar Nuevo Voluntario"}
-              </h3>
-              <button
-                onClick={handleCloseModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors text-2xl leading-none"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="p-6 max-h-[85vh] overflow-y-auto">
-              <VolunteerForm
-                idToEdit={selectedVolunteerId}
-                onClose={handleCloseModal}
-                onSuccess={handleSuccess}
-                readOnlyMode={isViewMode}
-                onParticipationChange={() => fetchVolunteers(false)}
-              />
+            <div className="p-6">
+              <ParticipationManager volunteerId={showParticipations.id} />
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

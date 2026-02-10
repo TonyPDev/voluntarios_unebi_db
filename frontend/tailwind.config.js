@@ -4,10 +4,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: "#1e40af", // Azul corporativo (ajustable)
+        primary: "#2563eb", // Azul más brillante (Blue 600)
+        primaryHover: "#1d4ed8", // Azul oscuro para hover
         secondary: "#64748b",
-        danger: "#ef4444",
-        success: "#22c55e",
+        surface: "#f8fafc", // Fondo gris muy claro
+        // Colores de estado
+        success: "#10b981", // Verde
+        warning: "#f59e0b", // Naranja
+        danger: "#ef4444", // Rojo
+        info: "#3b82f6", // Azul claro
       },
     },
   },

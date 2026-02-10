@@ -51,10 +51,52 @@ class Volunteer(models.Model):
     def save(self, *args, **kwargs):
         # Lógica para autogenerar código SOLO si no se proporcionó uno
         if not self.code:
-            year_suffix = str(self.created_at.year)[-2:] if self.created_at else '26'
-            # Buscamos el último consecutivo de ese año
-            last = Volunteer.objects.filter(code__endswith=f"-{year_suffix}").count() + 1
-            self.code = f"V-{year_suffix}-{last:04d}"
+            from datetime import date
+            today = date.today()
+            current_year = today.year  # 2026
+
+            # 1. Obtener Iniciales (Ej: Francisca Janette Gallegos García -> FGG)
+            # Primera letra nombre
+            ini_nom = self.first_name.strip()[0].upper()
+            # Primera letra paterno
+            ini_pat = self.last_name_paternal.strip()[0].upper()
+            # Primera letra materno (Si no tiene, usamos 'X')
+            if self.last_name_maternal and self.last_name_maternal.strip():
+                ini_mat = self.last_name_maternal.strip()[0].upper()
+            else:
+                ini_mat = 'X'
+            
+            initials = f"{ini_nom}{ini_pat}{ini_mat}"
+
+            # 2. Calcular el consecutivo global del año (Ej: 0338)
+            # Buscamos todos los códigos que contengan el año actual "-2026-"
+            # para encontrar el número más alto usado este año, sin importar las iniciales.
+            
+            # Obtenemos los códigos existentes del año
+            existing_codes = Volunteer.objects.filter(
+                code__contains=f"-{current_year}-"
+            ).values_list('code', flat=True)
+            
+            max_sequence = 0
+            
+            for code in existing_codes:
+                try:
+                    # El formato es INICIALES-AÑO-CONSECUTIVO
+                    # Hacemos split por guion '-' y tomamos la última parte
+                    parts = code.split('-')
+                    # Validamos que tenga al menos 3 partes y la ultima sea numero
+                    if len(parts) >= 3 and parts[-1].isdigit():
+                        sequence = int(parts[-1])
+                        if sequence > max_sequence:
+                            max_sequence = sequence
+                except (ValueError, IndexError):
+                    continue
+            
+            # El nuevo consecutivo es el máximo encontrado + 1
+            new_sequence = max_sequence + 1
+            
+            # 3. Formar el código final: FGG-2026-0338
+            self.code = f"{initials}-{current_year}-{new_sequence:04d}"
             
         super().save(*args, **kwargs)
 
