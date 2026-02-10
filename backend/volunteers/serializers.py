@@ -56,19 +56,25 @@ class VolunteerSerializer(serializers.ModelSerializer):
             return "En estudio"
         
         # 2. VALIDACIÓN DE EDAD (Mayor a 55 años)
-        # Si NO está en un estudio activo y tiene más de 55 años, es NO ELEGIBLE.
-        # --- CORRECCIÓN AQUÍ: Agregamos "obj.age is not None" ---
         if obj.age is not None and obj.age > 55:
             return "No elegible por edad"
 
-        # 3. Periodo de lavado (En espera)
+        # 3. PERIODO DE LAVADO (Lógica modificada)
         last_paid = obj.participations.filter(study__payment_date__isnull=False).order_by('-study__payment_date').first()
+        
         if last_paid:
             three_months_later = last_paid.study.payment_date + timedelta(days=90)
+            
+            # Si la fecha actual es MENOR a los 3 meses -> Sigue en descanso
             if today < three_months_later:
                 return "En espera (Descanso)"
+            
+            # NUEVO: Si la fecha actual es MAYOR a los 3 meses -> Pasa a Apto automáticamente
+            # (Siempre y cuando no haya sido rechazado manualmente por otra razón médica)
+            elif obj.manual_status != 'rejected':
+                return "Apto"
         
-        # 4. Estatus Administrativo Manual
+        # 4. Estatus Administrativo Manual (Fallback)
         status_map = {
             'waiting_approval': 'En espera por aprobación',
             'eligible': 'Apto',
