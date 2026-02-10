@@ -75,7 +75,22 @@ class VolunteerSerializer(serializers.ModelSerializer):
             'rejected': 'Rechazado'
         }
         return status_map.get(obj.manual_status, 'En espera por aprobación')
-    
+
+    def create(self, validated_data):
+        study_id = validated_data.pop('initial_study_id', None)
+        admission_date = validated_data.pop('initial_admission_date', None)
+        
+        volunteer = Volunteer.objects.create(**validated_data)
+
+        if study_id:
+            try:
+                study = Study.objects.get(pk=study_id)
+                Participation.objects.create(volunteer=volunteer, study=study)
+            except Exception:
+                pass 
+        
+        return volunteer
+
     def update(self, instance, validated_data):
         justification = validated_data.pop('justification', None)
         user = self.context['request'].user
