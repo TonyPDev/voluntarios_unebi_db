@@ -120,8 +120,7 @@ class ImportVolunteersView(APIView):
                         curp = None # Permitimos que sea None
 
                     # 3. Manejo de Código (Opcional)
-                    provided_code = row.get('codigo') or row.get('code') or row.get('código')
-                    
+                    provided_code = row.get('codigo') or row.get('code')
                     if provided_code:
                         provided_code = str(provided_code).strip()
                         if Volunteer.objects.filter(code=provided_code).exists():

@@ -57,8 +57,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
         
         # 2. VALIDACIÓN DE EDAD (Mayor a 55 años)
         # Si NO está en un estudio activo y tiene más de 55 años, es NO ELEGIBLE.
-        # --- CORRECCIÓN AQUÍ: Agregamos "obj.age is not None" ---
-        if obj.age is not None and obj.age > 55:
+        if obj.age > 55:
             return "No elegible por edad"
 
         # 3. Periodo de lavado (En espera)
@@ -75,7 +74,22 @@ class VolunteerSerializer(serializers.ModelSerializer):
             'rejected': 'Rechazado'
         }
         return status_map.get(obj.manual_status, 'En espera por aprobación')
-    
+
+    def create(self, validated_data):
+        study_id = validated_data.pop('initial_study_id', None)
+        admission_date = validated_data.pop('initial_admission_date', None)
+        
+        volunteer = Volunteer.objects.create(**validated_data)
+
+        if study_id:
+            try:
+                study = Study.objects.get(pk=study_id)
+                Participation.objects.create(volunteer=volunteer, study=study)
+            except Exception:
+                pass 
+        
+        return volunteer
+
     def update(self, instance, validated_data):
         justification = validated_data.pop('justification', None)
         user = self.context['request'].user
