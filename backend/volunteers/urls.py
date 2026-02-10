@@ -1,11 +1,12 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import VolunteerViewSet, ImportVolunteersView 
+from .views import VolunteerViewSet, ParticipationViewSet
 
 router = DefaultRouter()
-router.register(r'', VolunteerViewSet, basename='volunteers')
+
+router.register(r'', VolunteerViewSet, basename='volunteer')
+
 
 urlpatterns = [
-    path('import/', ImportVolunteersView.as_view(), name='import-volunteers'),
     path('', include(router.urls)),
 ]
