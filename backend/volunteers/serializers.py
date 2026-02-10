@@ -57,7 +57,8 @@ class VolunteerSerializer(serializers.ModelSerializer):
         
         # 2. VALIDACIÓN DE EDAD (Mayor a 55 años)
         # Si NO está en un estudio activo y tiene más de 55 años, es NO ELEGIBLE.
-        if obj.age > 55:
+        # --- CORRECCIÓN AQUÍ: Agregamos "obj.age is not None" ---
+        if obj.age is not None and obj.age > 55:
             return "No elegible por edad"
 
         # 3. Periodo de lavado (En espera)
