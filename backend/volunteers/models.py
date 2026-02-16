@@ -18,7 +18,7 @@ class Volunteer(models.Model):
     
     # La fecha puede ser nula
     birth_date = models.DateField(blank=True, null=True)
-    
+    contacted = models.BooleanField(default=False, verbose_name="Contactado por WhatsApp")
     SEX_CHOICES = [('M', 'Masculino'), ('F', 'Femenino')]
     sex = models.CharField(max_length=1, choices=SEX_CHOICES, blank=True, null=True)
     
