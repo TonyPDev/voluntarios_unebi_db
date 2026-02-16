@@ -26,6 +26,8 @@ import {
   AlertTriangle,
   CheckCircle,
   ChevronDown,
+  MessageCircle,
+  CheckCircle2,
 } from "lucide-react";
 import Modal from "../components/Modal";
 import SmartTable from "../components/SmartTable";
@@ -33,6 +35,7 @@ import { AuthContext } from "../context/AuthContext";
 import VolunteerForm from "./VolunteerForm";
 import ParticipationManager from "../components/ParticipationManager";
 
+// --- Componente ResponsiveStudyTags (Sin cambios) ---
 const ResponsiveStudyTags = ({ participations }) => {
   const containerRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(1);
@@ -45,7 +48,6 @@ const ResponsiveStudyTags = ({ participations }) => {
       const badgeApproxWidth = 35;
       const gap = 4;
       const estimateWidth = (text) => text.length * 7 + 14;
-
       for (let i = 0; i < participations.length; i++) {
         const itemWidth = estimateWidth(participations[i].study_name);
         if (
@@ -66,11 +68,9 @@ const ResponsiveStudyTags = ({ participations }) => {
       }
       return Math.max(1, count);
     };
-
     const observer = new ResizeObserver((entries) => {
       for (let entry of entries) {
-        const width = entry.contentRect.width;
-        setVisibleCount(calculateVisibleItems(width));
+        setVisibleCount(calculateVisibleItems(entry.contentRect.width));
       }
     });
     observer.observe(containerRef.current);
@@ -79,7 +79,6 @@ const ResponsiveStudyTags = ({ participations }) => {
 
   if (!participations || participations.length === 0)
     return <span className="text-gray-300 text-xs italic">-</span>;
-
   const visibleItems = participations.slice(0, visibleCount);
   const remainder = participations.length - visibleCount;
   const fullListString = participations.map((p) => p.study_name).join(", ");
@@ -120,7 +119,6 @@ const VolunteerList = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
-  // --- CARGA DE DATOS ---
   const fetchVolunteers = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
@@ -211,29 +209,6 @@ const VolunteerList = () => {
     }
   }, [volunteers, activeTab]);
 
-  const tabLabels = {
-    todos: "Todos",
-    aptos: "Aptos",
-    en_estudio: "En Estudio",
-    asignado: "Asignados",
-    por_aprobacion: "Por Aprobar",
-    descanso: "En Descanso",
-    rechazados: "Rechazados",
-  };
-
-  const getTableTitle = () => {
-    const titles = {
-      todos: "Base de Datos Completa",
-      aptos: "Voluntarios Aptos",
-      en_estudio: "Participando Actualmente",
-      asignado: "Programados para Ingreso",
-      por_aprobacion: "Solicitudes Pendientes",
-      descanso: "Periodo de Lavado (Descanso)",
-      rechazados: "Voluntarios No Aptos / Rechazados",
-    };
-    return titles[activeTab] || "Voluntarios";
-  };
-
   const handleCreate = () => {
     setSelectedVolunteerId(null);
     setIsViewMode(false);
@@ -258,6 +233,28 @@ const VolunteerList = () => {
     fetchVolunteers(false);
   };
 
+  const handleToggleContacted = async (volunteer) => {
+    const originalValue = volunteer.contacted;
+    const newValue = !originalValue;
+    setVolunteers((prev) =>
+      prev.map((v) =>
+        v.id === volunteer.id ? { ...v, contacted: newValue } : v,
+      ),
+    );
+    try {
+      // API call: Backend ahora auto-genera la justificación si falta
+      await api.patch(`volunteers/${volunteer.id}/`, { contacted: newValue });
+    } catch (error) {
+      console.error(error);
+      setVolunteers((prev) =>
+        prev.map((v) =>
+          v.id === volunteer.id ? { ...v, contacted: originalValue } : v,
+        ),
+      );
+      alert("Error de conexión. Intente de nuevo.");
+    }
+  };
+
   const handleDownloadTemplate = async () => {
     try {
       const response = await api.get("volunteers/download-template/", {
@@ -275,17 +272,12 @@ const VolunteerList = () => {
       alert("Error al descargar la plantilla");
     }
   };
-
-  // --- EXPORTAR DATOS (Con soporte para pestañas) ---
   const handleExportData = async (filterType = "todos") => {
     try {
-      // Si filterType es 'current', usamos el activeTab. Si no, usamos 'todos'.
       const tabParam = filterType === "current" ? activeTab : "todos";
-
       const response = await api.get(`volunteers/export/?tab=${tabParam}`, {
         responseType: "blob",
       });
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -295,11 +287,9 @@ const VolunteerList = () => {
       link.remove();
       setShowActionsMenu(false);
     } catch (error) {
-      console.error(error);
       alert("Error al exportar los datos");
     }
   };
-
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -314,10 +304,7 @@ const VolunteerList = () => {
       setIsImportModalOpen(true);
       fetchVolunteers(false);
     } catch (error) {
-      alert(
-        "Error crítico al subir archivo: " +
-          (error.response?.data?.error || error.message),
-      );
+      alert("Error: " + (error.response?.data?.error || error.message));
     } finally {
       setLoading(false);
       e.target.value = null;
@@ -333,56 +320,43 @@ const VolunteerList = () => {
     return Array.from(options).sort();
   }, [volunteers]);
 
-  const columns = [
-    {
-      key: "code",
-      label: "Código",
-      width: "120px",
-      sortable: true,
-      customSort: (a, b) => {
-        if (a.code_year_filter !== b.code_year_filter)
-          return b.code_year_filter.localeCompare(a.code_year_filter);
-        return a.code_number_sort - b.code_number_sort;
-      },
+  // --- COLUMNAS DINÁMICAS ---
+  const columns = useMemo(() => {
+    // 1. Definición de la columna Contactado (para reutilizar)
+    const colContacted = {
+      key: "contacted",
+      label: "Contactado?",
+      width: "90px",
+      defaultHidden: false, // CLAVE: Esto asegura que se vea por defecto
       render: (row) => (
-        <span className="font-mono font-bold text-blue-700">
-          {row.code || "---"}
-        </span>
-      ),
-    },
-    {
-      key: "full_name_search",
-      label: "Nombre Completo",
-      width: "220px",
-      sortable: true,
-      render: (row) => (
-        <div className="flex flex-col justify-center">
-          <span
-            className="font-medium text-gray-900 truncate"
-            title={row.full_name_search}
+        <div className="flex justify-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleContacted(row);
+            }}
+            className={`p-1.5 rounded-full transition-all duration-200 transform active:scale-95 flex items-center justify-center ${row.contacted ? "bg-green-100 text-green-600 hover:bg-green-200" : "bg-gray-100 text-gray-300 hover:bg-gray-200 hover:text-gray-400"}`}
+            title={
+              row.contacted
+                ? "Contactado por WhatsApp"
+                : "Marcar como contactado"
+            }
           >
-            {row.full_name_search}
-          </span>
-          <span className="text-xs text-gray-400 truncate">
-            {row.email || ""}
-          </span>
+            {row.contacted ? (
+              <CheckCircle2 size={20} className="stroke-[2.5px]" />
+            ) : (
+              <MessageCircle size={20} />
+            )}
+          </button>
         </div>
       ),
-    },
-    {
-      key: "history",
-      label: "Historial (Recientes)",
-      width: "200px",
-      filterKey: "study_names_filter",
-      filterOptions: studyOptions,
-      render: (row) => (
-        <ResponsiveStudyTags participations={row.participations} />
-      ),
-    },
-    {
+    };
+
+    const colActiveStudy = {
       key: "active_study",
       label: "Estudio Actual",
       width: "140px",
+      defaultHidden: false,
       render: (row) =>
         row.active_study ? (
           <span className="bg-indigo-50 text-indigo-700 text-[11px] px-2 py-1 rounded-md font-semibold border border-indigo-100 block text-center truncate">
@@ -391,87 +365,164 @@ const VolunteerList = () => {
         ) : (
           <span className="text-gray-300 text-xs">-</span>
         ),
-    },
-    { key: "age", label: "Edad", width: "70px", sortable: true },
-    {
+    };
+    const colLastStudy = {
+      key: "last_study",
+      label: "Último Estudio",
+      width: "150px",
+      defaultHidden: false,
+      render: (row) => (
+        <span className="text-gray-600 text-sm italic truncate block">
+          {row.last_study}
+        </span>
+      ),
+    };
+    const colSex = {
       key: "sex",
       label: "Sexo",
       width: "60px",
       filterKey: "sex",
-      defaultHidden: true,
       filterOptions: ["M", "F"],
-    },
-    { key: "curp", label: "CURP", width: "170px" },
-    { key: "phone", label: "Teléfono", width: "110px" },
-    {
-      key: "status",
-      label: "Estatus",
-      width: "150px",
-      filterKey: "status",
-      filterOptions: [
-        "Apto",
-        "En estudio",
-        "Estudio asignado",
-        "En espera por aprobación",
-        "En espera (Descanso)",
-        "Rechazado",
-      ],
-      render: (row) => {
-        const s = row.status || "";
-        let style = "bg-gray-100 text-gray-600 border-gray-200";
-        if (s === "Apto") style = "bg-green-50 text-green-700 border-green-200";
-        else if (s === "En estudio")
-          style = "bg-indigo-50 text-indigo-700 border-indigo-200";
-        else if (s === "Estudio asignado")
-          style = "bg-violet-50 text-violet-700 border-violet-200";
-        else if (s === "En espera por aprobación")
-          style = "bg-orange-50 text-orange-700 border-orange-200";
-        else if (s === "En espera (Descanso)")
-          style = "bg-teal-50 text-teal-700 border-teal-200";
-        else if (s.includes("Rechazado") || s.includes("No elegible"))
-          style = "bg-red-50 text-red-700 border-red-200";
-        return (
-          <span
-            className={`px-2 py-1 rounded-full text-[10px] font-bold border ${style} block text-center truncate`}
-          >
-            {s}
+      defaultHidden: false,
+    };
+
+    // 2. Construcción de columnas base (Izquierda)
+    const baseCols = [
+      {
+        key: "code",
+        label: "Código",
+        width: "120px",
+        sortable: true,
+        customSort: (a, b) => {
+          if (a.code_year_filter !== b.code_year_filter)
+            return b.code_year_filter.localeCompare(a.code_year_filter);
+          return a.code_number_sort - b.code_number_sort;
+        },
+        render: (row) => (
+          <span className="font-mono font-bold text-blue-700">
+            {row.code || "---"}
           </span>
-        );
+        ),
       },
-    },
-    {
-      key: "actions",
-      label: "Acciones",
-      width: "110px",
-      render: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          <button
-            onClick={() => handleView(row.id)}
-            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-            title="Ver Detalles"
-          >
-            <Eye size={16} />
-          </button>
-          {user?.isAdmin && (
-            <button
-              onClick={() => handleEdit(row.id)}
-              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
-              title="Editar"
+      {
+        key: "full_name_search",
+        label: "Nombre Completo",
+        width: "220px",
+        sortable: true,
+        render: (row) => (
+          <div className="flex flex-col justify-center">
+            <span
+              className="font-medium text-gray-900 truncate"
+              title={row.full_name_search}
             >
-              <Edit size={16} />
+              {row.full_name_search}
+            </span>
+            <span className="text-xs text-gray-400 truncate">
+              {row.email || ""}
+            </span>
+          </div>
+        ),
+      },
+      {
+        key: "history",
+        label: "Historial",
+        width: "200px",
+        filterKey: "study_names_filter",
+        filterOptions: studyOptions,
+        render: (row) => (
+          <ResponsiveStudyTags participations={row.participations} />
+        ),
+      },
+    ];
+
+    // 3. Columnas Variables (Centro)
+    let middleCols = [];
+    if (["todos", "en_estudio"].includes(activeTab))
+      middleCols.push(colActiveStudy);
+    if (activeTab === "descanso") middleCols.push(colLastStudy);
+    if (["por_aprobacion", "rechazados"].includes(activeTab))
+      middleCols.push(colSex);
+
+    // 4. Columnas Finales (Derecha)
+    const endCols = [
+      { key: "age", label: "Edad", width: "70px", sortable: true },
+      { key: "curp", label: "CURP", width: "170px" },
+      { key: "phone", label: "Teléfono", width: "110px" },
+      // AQUÍ INSERTAMOS 'CONTACTED' DESPUÉS DEL TELÉFONO (Solo en Aptos)
+      ...(activeTab === "aptos" ? [colContacted] : []),
+      {
+        key: "status",
+        label: "Estatus",
+        width: "150px",
+        filterKey: "status",
+        filterOptions: [
+          "Apto",
+          "En estudio",
+          "Estudio asignado",
+          "En espera por aprobación",
+          "En espera (Descanso)",
+          "Rechazado",
+        ],
+        render: (row) => {
+          const s = row.status || "";
+          let style = "bg-gray-100 text-gray-600 border-gray-200";
+          if (s === "Apto")
+            style = "bg-green-50 text-green-700 border-green-200";
+          else if (s === "En estudio")
+            style = "bg-indigo-50 text-indigo-700 border-indigo-200";
+          else if (s === "Estudio asignado")
+            style = "bg-violet-50 text-violet-700 border-violet-200";
+          else if (s.includes("aprobación"))
+            style = "bg-orange-50 text-orange-700 border-orange-200";
+          else if (s.includes("Descanso"))
+            style = "bg-teal-50 text-teal-700 border-teal-200";
+          else if (s.includes("Rechazado") || s.includes("No elegible"))
+            style = "bg-red-50 text-red-700 border-red-200";
+          return (
+            <span
+              className={`px-2 py-1 rounded-full text-[10px] font-bold border ${style} block text-center truncate`}
+            >
+              {s}
+            </span>
+          );
+        },
+      },
+      {
+        key: "actions",
+        label: "Acciones",
+        width: "110px",
+        render: (row) => (
+          <div className="flex items-center justify-center gap-1">
+            <button
+              onClick={() => handleView(row.id)}
+              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+              title="Ver Detalles"
+            >
+              <Eye size={16} />
             </button>
-          )}
-          <button
-            onClick={() => setShowHistoryFor(row)}
-            className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
-            title="Historial Rápido"
-          >
-            <FlaskConical size={16} />
-          </button>
-        </div>
-      ),
-    },
-  ];
+            {user?.isAdmin && (
+              <button
+                onClick={() => handleEdit(row.id)}
+                className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
+                title="Editar"
+              >
+                <Edit size={16} />
+              </button>
+            )}
+            <button
+              onClick={() => setShowHistoryFor(row)}
+              className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+              title="Historial Rápido"
+            >
+              <FlaskConical size={16} />
+            </button>
+          </div>
+        ),
+      },
+    ];
+
+    return [...baseCols, ...middleCols, ...endCols];
+  }, [studyOptions, user, activeTab, volunteers]);
 
   const FilterTab = ({ id, label, icon: Icon, color, count }) => {
     const isActive = activeTab === id;
@@ -499,11 +550,33 @@ const VolunteerList = () => {
     );
   };
 
+  const tabLabels = {
+    todos: "Todos",
+    aptos: "Aptos",
+    en_estudio: "En Estudio",
+    asignado: "Asignados",
+    por_aprobacion: "Por Aprobar",
+    descanso: "En Descanso",
+    rechazados: "Rechazados",
+  };
+  const getTableTitle = () => {
+    const titles = {
+      todos: "Base de Datos",
+      aptos: "Aptos",
+      en_estudio: "En Estudio",
+      asignado: "Asignados",
+      por_aprobacion: "Por Aprobar",
+      descanso: "En Descanso",
+      rechazados: "Rechazados",
+    };
+    return titles[activeTab] || "Voluntarios";
+  };
+
   if (loading && !volunteers.length)
     return (
       <div className="p-10 text-center flex flex-col items-center justify-center h-64">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mb-4"></div>
-        <p className="text-gray-500">Cargando directorio...</p>
+        <p className="text-gray-500">Cargando...</p>
       </div>
     );
 
@@ -593,7 +666,9 @@ const VolunteerList = () => {
       </div>
 
       <div className="flex-1">
+        {/* KEY=ACTIVETAB ES CRÍTICO: FUERZA EL RESET DE LA TABLA AL CAMBIAR PESTAÑA */}
         <SmartTable
+          key={activeTab}
           title={getTableTitle()}
           data={filteredData}
           columns={columns}
@@ -614,22 +689,25 @@ const VolunteerList = () => {
                   </button>
                   {showActionsMenu && (
                     <>
+                      {" "}
                       <div
                         className="fixed inset-0 z-10"
                         onClick={() => setShowActionsMenu(false)}
-                      ></div>
+                      ></div>{" "}
                       <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 z-20 overflow-hidden animate-fade-in-up">
+                        {" "}
                         <div className="p-2">
+                          {" "}
                           <div className="text-xs font-bold text-gray-400 px-3 py-1 uppercase tracking-wider">
                             Importación
-                          </div>
+                          </div>{" "}
                           <input
                             type="file"
                             accept=".xlsx, .xls"
                             id="excel-upload"
                             className="hidden"
                             onChange={handleFileUpload}
-                          />
+                          />{" "}
                           <button
                             onClick={() =>
                               document.getElementById("excel-upload").click()
@@ -637,40 +715,35 @@ const VolunteerList = () => {
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors text-left"
                           >
                             <Upload size={16} /> Importar Excel
-                          </button>
+                          </button>{" "}
                           <button
                             onClick={handleDownloadTemplate}
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors text-left"
                           >
                             <FileDown size={16} /> Descargar Plantilla
-                          </button>
-
-                          <div className="h-px bg-gray-100 my-1"></div>
+                          </button>{" "}
+                          <div className="h-px bg-gray-100 my-1"></div>{" "}
                           <div className="text-xs font-bold text-gray-400 px-3 py-1 uppercase tracking-wider">
                             Exportación
-                          </div>
-
-                          {/* OPCIÓN DINÁMICA SEGÚN PESTAÑA */}
+                          </div>{" "}
                           <button
                             onClick={() => handleExportData("current")}
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 rounded-lg transition-colors text-left font-medium"
                           >
                             <Download size={16} /> Exportar{" "}
-                            {tabLabels[activeTab] || "Vista Actual"}
-                          </button>
-
+                            {tabLabels[activeTab] || activeTab}
+                          </button>{" "}
                           <button
                             onClick={() => handleExportData("todos")}
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-800 rounded-lg transition-colors text-left"
                           >
                             <Users size={16} /> Exportar Base Completa
-                          </button>
-                        </div>
-                      </div>
+                          </button>{" "}
+                        </div>{" "}
+                      </div>{" "}
                     </>
                   )}
                 </div>
-
                 <button
                   onClick={handleCreate}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm font-bold shadow-md shadow-blue-600/20 active:scale-95"
@@ -683,12 +756,12 @@ const VolunteerList = () => {
         />
       </div>
 
-      {/* MODALES (IMPORTACIÓN, EDICIÓN, HISTORIAL) - SE MANTIENEN IGUALES ... */}
       <Modal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         title="Resultados de Importación"
       >
+        {" "}
         <div className="p-6">
           {importResults && (
             <div className="space-y-4">
@@ -742,7 +815,6 @@ const VolunteerList = () => {
           )}
         </div>
       </Modal>
-
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl my-auto relative flex flex-col max-h-[90vh]">
@@ -773,7 +845,6 @@ const VolunteerList = () => {
           </div>
         </div>
       )}
-
       {activeVolunteer && (
         <div
           className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[1px]"
