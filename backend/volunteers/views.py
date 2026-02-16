@@ -1,150 +1,274 @@
 import pandas as pd
+import numpy as np
 import re
-from rest_framework import viewsets, filters, status
-from rest_framework.decorators import action
+import os
+from datetime import date, timedelta
+from django.conf import settings
+from django.http import HttpResponse
+from rest_framework import viewsets, status, permissions, filters
+from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import IsAdminUser
+from django.db.models import Q
+
 from .models import Volunteer, Participation
-from studies.models import Study # Importamos el modelo de Estudios
+from studies.models import Study
+from auditing.models import AuditLog
 from .serializers import VolunteerSerializer, ParticipationSerializer
 from .permissions import IsAdminOrReadOnly
 
 class VolunteerViewSet(viewsets.ModelViewSet):
     queryset = Volunteer.objects.all().order_by('-created_at')
     serializer_class = VolunteerSerializer
-    permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
     
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['first_name', 'last_name_paternal', 'last_name_maternal', 'code', 'curp']
     ordering_fields = ['created_at', 'birth_date', 'code']
 
-    @action(detail=False, methods=['POST'], url_path='import')
-    def import_volunteers(self, request):
-        file = request.FILES.get('file')
+    # --- MÉTODO AUXILIAR PARA CALCULAR ESTATUS ---
+    def calculate_status(self, volunteer):
+        today = date.today()
         
-        if not file:
-            return Response({"error": "No se proporcionó ningún archivo."}, status=status.HTTP_400_BAD_REQUEST)
+        # 1. En estudio activo
+        active_part = volunteer.participations.filter(study__is_active=True).first()
+        if active_part:
+            if active_part.study.admission_date and active_part.study.admission_date > today:
+                return "Estudio asignado"
+            return "En estudio"
+        
+        # 2. Edad > 55
+        if volunteer.age and volunteer.age > 55:
+            return "No elegible por edad"
 
+        # 3. Periodo de Lavado (3 meses)
+        last_paid = volunteer.participations.filter(study__payment_date__isnull=False).order_by('-study__payment_date').first()
+        if last_paid:
+            three_months_later = last_paid.study.payment_date + timedelta(days=90)
+            if today < three_months_later:
+                return "En espera (Descanso)"
+            elif volunteer.manual_status != 'rejected':
+                return "Apto"
+        
+        # 4. Fallback Manual
+        status_map = {
+            'waiting_approval': 'En espera por aprobación',
+            'eligible': 'Apto',
+            'rejected': 'Rechazado'
+        }
+        return status_map.get(volunteer.manual_status, 'En espera por aprobación')
+
+    @action(detail=True, methods=['post'], url_path='add-participation')
+    def add_participation(self, request, pk=None):
+        volunteer = self.get_object()
+        user = request.user
+        
+        if not user.is_staff:
+             return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
+
+        justification = request.data.get('justification')
+        if not justification:
+            return Response({"detail": "La justificación es requerida."}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = request.data.copy()
+        data['volunteer'] = volunteer.id
+        if 'study_id' in data:
+            data['study'] = data.pop('study_id')
+
+        serializer = ParticipationSerializer(data=data)
+        if serializer.is_valid():
+            participation = serializer.save()
+            AuditLog.objects.create(
+                user=user,
+                action='CREATE',
+                model_affected='Participation',
+                record_id=volunteer.code or str(volunteer.id),
+                changes={'Acción': 'Asignación Manual', 'Estudio': participation.study.name},
+                justification=justification
+            )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='download-template')
+    def download_template(self, request):
+        file_path = os.path.join(settings.BASE_DIR, 'volunteers', 'files', 'plantilla_voluntarios.xlsx')
+        if os.path.exists(file_path):
+            with open(file_path, 'rb') as fh:
+                response = HttpResponse(fh.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                response['Content-Disposition'] = 'attachment; filename="plantilla_voluntarios.xlsx"'
+                return response
+        else:
+            return Response({"error": "El archivo de plantilla no se encuentra en el servidor."}, status=status.HTTP_404_NOT_FOUND)
+
+    # --- EXPORTAR DATOS (FILTRADO POR PESTAÑA) ---
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_data(self, request):
+        # Leemos el parámetro 'tab' de la URL (ej: export/?tab=aptos)
+        target_tab = request.query_params.get('tab', 'todos')
+        
+        volunteers = self.get_queryset()
+        data = []
+
+        for v in volunteers:
+            # 1. Calculamos el estatus real
+            real_status = self.calculate_status(v)
+            
+            # 2. FILTRADO: Si no estamos en "todos", verificamos si el estatus coincide con la pestaña
+            include_row = True
+            
+            if target_tab != 'todos':
+                if target_tab == 'aptos' and real_status != "Apto":
+                    include_row = False
+                elif target_tab == 'en_estudio' and real_status != "En estudio":
+                    include_row = False
+                elif target_tab == 'asignado' and real_status != "Estudio asignado":
+                    include_row = False
+                elif target_tab == 'por_aprobacion' and real_status != "En espera por aprobación":
+                    include_row = False
+                elif target_tab == 'descanso' and real_status != "En espera (Descanso)":
+                    include_row = False
+                elif target_tab == 'rechazados' and not ("Rechazado" in real_status or "No elegible" in real_status):
+                    include_row = False
+
+            if include_row:
+                fecha_nac = v.birth_date.strftime('%d/%m/%Y') if v.birth_date else ""
+                estudios = ", ".join([p.study.name for p in v.participations.all()])
+                
+                row = {
+                    'Codigo': v.code,
+                    'Nombre': v.first_name,
+                    'Segundo Nombre': v.middle_name,
+                    'Apellido Paterno': v.last_name_paternal,
+                    'Apellido Materno': v.last_name_maternal,
+                    'Fecha Nacimiento': fecha_nac,
+                    'Sexo': v.sex,
+                    'CURP': v.curp,
+                    'Telefono': v.phone,
+                    'Estudios': estudios,
+                    'Estatus Actual': real_status
+                }
+                data.append(row)
+
+        df = pd.DataFrame(data)
+        
+        # Nombre del archivo dinámico
+        filename = f"voluntarios_{target_tab}.xlsx"
+        
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        df.to_excel(response, index=False)
+        return response
+
+class ParticipationViewSet(viewsets.ModelViewSet):
+    queryset = Participation.objects.all()
+    serializer_class = ParticipationSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+class ImportVolunteersView(APIView):
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request, format=None):
+        if 'file' not in request.data:
+            return Response({"error": "No se proporcionó ningún archivo."}, status=status.HTTP_400_BAD_REQUEST)
+        file = request.data['file']
         try:
             try:
                 df = pd.read_excel(file)
             except Exception:
                 return Response({"error": "El archivo no es un Excel válido (.xlsx)."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Normalizar columnas
+            df = df.replace({np.nan: None})
             df.columns = [str(c).lower().strip() for c in df.columns]
 
             created_count = 0
             errors = []
-            
-            # Regex CURP
             curp_pattern = r'^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2}$'
 
             for index, row in df.iterrows():
-                row_num = index + 2 
-
+                row_num = index + 2
                 try:
-                    # 1. Función de limpieza
                     def clean(val): 
-                        if pd.isna(val): return ""
+                        if pd.isna(val) or val is None or str(val).strip() == "": return None
                         return str(val).strip()
 
-                    # 2. Validaciones de CURP
                     raw_curp = row.get('curp')
-                    curp = clean(raw_curp).upper() if raw_curp else None
-
-                    if not curp:
-                        errors.append(f"Fila {row_num}: La CURP es obligatoria.")
-                        continue
-
-                    if len(curp) != 18:
-                        errors.append(f"Fila {row_num}: La CURP '{curp}' debe tener 18 caracteres.")
-                        continue
-
-                    if not re.match(curp_pattern, curp):
-                        errors.append(f"Fila {row_num}: La CURP '{curp}' tiene formato inválido.")
-                        continue
-
-                    if Volunteer.objects.filter(curp=curp).exists():
-                        errors.append(f"Fila {row_num}: La CURP '{curp}' ya está registrada.")
-                        continue
-
-                    # 3. Datos del Voluntario
+                    curp = clean(raw_curp)
+                    if curp:
+                        curp = curp.upper()
+                        if len(curp) != 18:
+                            errors.append(f"Fila {row_num}: La CURP '{curp}' debe tener 18 caracteres.")
+                            continue
+                        if not re.match(curp_pattern, curp):
+                            errors.append(f"Fila {row_num}: La CURP '{curp}' tiene formato inválido.")
+                            continue
+                        if Volunteer.objects.filter(curp=curp).exists():
+                            errors.append(f"Fila {row_num}: La CURP '{curp}' ya se encuentra registrada.")
+                            continue
+                    
                     first_name = clean(row.get('nombre', row.get('first_name')))
                     paternal = clean(row.get('apellido paterno', row.get('last_name_paternal')))
                     
                     if not first_name or not paternal:
-                        errors.append(f"Fila {row_num}: Falta Nombre o Apellido Paterno.")
+                        errors.append(f"Fila {row_num}: Faltan datos obligatorios (Nombre o Apellido Paterno).")
                         continue
 
-                    # Sexo (Normalización)
-                    sex_val = clean(row.get('sexo', row.get('sex'))).upper()
-                    if sex_val.startswith('H'): sex_val = 'M'
-                    elif sex_val.startswith('M'): sex_val = 'F'
-                    if sex_val not in ['M', 'F']:
-                         # Si viene vacío o raro, asignamos None o reportamos error
-                         sex_val = None 
+                    provided_code = clean(row.get('codigo', row.get('code')))
+                    if provided_code:
+                        if Volunteer.objects.filter(code=provided_code).exists():
+                            errors.append(f"Fila {row_num}: El código '{provided_code}' ya existe.")
+                            continue
 
-                    # Fecha Nacimiento
+                    sex_val = clean(row.get('sexo', row.get('sex')))
+                    if sex_val:
+                        sex_val = sex_val.upper()
+                        if sex_val.startswith('H'): sex_val = 'M'
+                        elif sex_val.startswith('M'): sex_val = 'F'
+                        if sex_val not in ['M', 'F']: sex_val = None
+
                     birth_date = None
                     raw_date = row.get('fecha nacimiento', row.get('fecha de nacimiento'))
-                    if pd.notna(raw_date) and str(raw_date).strip() != '':
+                    if raw_date:
                         try:
                             birth_date = pd.to_datetime(raw_date).date()
-                        except:
-                            pass # Si falla, se queda en None
+                        except: pass
 
-                    # CÓDIGO (Importante: leerlo del excel si viene)
-                    provided_code = clean(row.get('codigo', row.get('code')))
-                    if not provided_code:
-                        provided_code = None # Dejar que el modelo lo autogenere
-                    elif Volunteer.objects.filter(code=provided_code).exists():
-                        errors.append(f"Fila {row_num}: El código '{provided_code}' ya existe.")
-                        continue
+                    phone = clean(row.get('telefono', row.get('phone'))) or ""
 
-                    # 4. Creación
                     volunteer = Volunteer.objects.create(
                         code=provided_code,
                         first_name=first_name,
                         middle_name=clean(row.get('segundo nombre', row.get('middle_name'))),
                         last_name_paternal=paternal,
                         last_name_maternal=clean(row.get('apellido materno', row.get('last_name_maternal'))),
-                        phone=clean(row.get('telefono', row.get('phone'))),
+                        phone=phone,
                         sex=sex_val,
                         curp=curp,
-                        birth_date=birth_date
-                        # ¡OJO! Eliminé 'email' porque tu modelo no lo tiene
+                        birth_date=birth_date,
+                        manual_status='waiting_approval'
                     )
                     created_count += 1
 
-                    # 5. ASIGNACIÓN DE ESTUDIOS (Opcional, basado en tu imagen)
                     estudios_str = clean(row.get('estudios', row.get('studies')))
                     if estudios_str:
-                        # Asumiendo formato: "Estudio A, Estudio B"
                         names = [s.strip() for s in estudios_str.split(',') if s.strip()]
                         for study_name in names:
                             study = Study.objects.filter(name__iexact=study_name).first()
                             if study:
-                                Participation.objects.get_or_create(
-                                    volunteer=volunteer,
-                                    study=study
-                                )
+                                Participation.objects.get_or_create(volunteer=volunteer, study=study)
                 
-                except Exception as row_e:
-                    errors.append(f"Fila {row_num}: Error técnico - {str(row_e)}")
+                except Exception as row_error:
+                    errors.append(f"Fila {row_num}: Error técnico - {str(row_error)}")
 
-            response_data = {
-                "message": "Proceso finalizado.",
+            return Response({
+                "message": "Proceso de importación finalizado.",
                 "created": created_count,
                 "errors": errors,
                 "has_errors": len(errors) > 0
-            }
-            return Response(response_data, status=status.HTTP_200_OK)
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class ParticipationViewSet(viewsets.ModelViewSet):
-    queryset = Participation.objects.all()
-    serializer_class = ParticipationSerializer
-    permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
+            return Response({"error": f"Error crítico al procesar archivo: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
