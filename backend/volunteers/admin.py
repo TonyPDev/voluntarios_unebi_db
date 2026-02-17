@@ -16,13 +16,13 @@ class ParticipationInline(admin.TabularInline):
 @admin.register(Volunteer)
 class VolunteerAdmin(admin.ModelAdmin):
     # Columnas que se ven en la lista (igual que tu SmartTable)
-    list_display = ('code', 'full_name', 'age_display', 'curp', 'phone', 'manual_status_colored')
+    list_display = ('code', 'full_name', 'age_display', 'curp', 'phone', 'manual_status_colored', 'contacted')
     
     # Buscador (por nombre, código o curp)
     search_fields = ('code', 'first_name', 'last_name_paternal', 'last_name_maternal', 'curp')
     
     # Filtros laterales
-    list_filter = ('sex', 'manual_status', 'created_at')
+    list_filter = ('sex', 'manual_status', 'contacted', 'created_at')
     
     # Edición de participaciones dentro del voluntario
     inlines = [ParticipationInline]
@@ -41,7 +41,7 @@ class VolunteerAdmin(admin.ModelAdmin):
             )
         }),
         ('Estatus Administrativo', {
-            'fields': ('manual_status', 'status_reason'),
+            'fields': ('manual_status', 'status_reason', 'contacted'),
             'classes': ('collapse',) # Se puede colapsar
         }),
         ('Metadatos', {

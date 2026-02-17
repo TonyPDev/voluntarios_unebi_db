@@ -20,7 +20,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     last_study = serializers.SerializerMethodField()
     active_study = serializers.SerializerMethodField()
-    age = serializers.IntegerField(read_only=True)
+    age = serializers.IntegerField(read_only=True) # Exponemos la edad calculada
     
     justification = serializers.CharField(write_only=True, required=False)
     initial_study_id = serializers.IntegerField(write_only=True, required=False)
@@ -32,9 +32,8 @@ class VolunteerSerializer(serializers.ModelSerializer):
             'id', 'code', 'first_name', 'middle_name', 'last_name_paternal', 
             'last_name_maternal', 'sex', 'phone', 'curp', 'birth_date', 'age',
             'created_at', 'participations', 'status', 'active_study', 'last_study',
-            'manual_status', 'status_reason',
-            'justification', 'initial_study_id', 'initial_admission_date',
-            'contacted' 
+            'manual_status', 'status_reason', 'contacted', # <-- AGREGADO
+            'justification', 'initial_study_id', 'initial_admission_date'
         ]
         read_only_fields = ['code', 'age']
 
@@ -49,23 +48,33 @@ class VolunteerSerializer(serializers.ModelSerializer):
     def get_status(self, obj):
         today = date.today()
         
+        # 1. PRIORIDAD MÁXIMA: En estudio activo
         active_part = obj.participations.filter(study__is_active=True).first()
         if active_part:
             if active_part.study.admission_date and active_part.study.admission_date > today:
                 return "Estudio asignado"
             return "En estudio"
         
+        # 2. VALIDACIÓN DE EDAD (Mayor a 55 años)
         if obj.age is not None and obj.age > 55:
             return "No elegible por edad"
 
+        # 3. PERIODO DE LAVADO (Lógica modificada)
         last_paid = obj.participations.filter(study__payment_date__isnull=False).order_by('-study__payment_date').first()
+        
         if last_paid:
             three_months_later = last_paid.study.payment_date + timedelta(days=90)
+            
+            # Si la fecha actual es MENOR a los 3 meses -> Sigue en descanso
             if today < three_months_later:
                 return "En espera (Descanso)"
+            
+            # NUEVO: Si la fecha actual es MAYOR a los 3 meses -> Pasa a Apto automáticamente
+            # (Siempre y cuando no haya sido rechazado manualmente por otra razón médica)
             elif obj.manual_status != 'rejected':
                 return "Apto"
         
+        # 4. Estatus Administrativo Manual (Fallback)
         status_map = {
             'waiting_approval': 'En espera por aprobación',
             'eligible': 'Apto',
@@ -75,7 +84,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         study_id = validated_data.pop('initial_study_id', None)
-        validated_data.pop('initial_admission_date', None)
+        admission_date = validated_data.pop('initial_admission_date', None)
         
         volunteer = Volunteer.objects.create(**validated_data)
 
@@ -92,16 +101,8 @@ class VolunteerSerializer(serializers.ModelSerializer):
         justification = validated_data.pop('justification', None)
         user = self.context['request'].user
 
-        # --- Lógica de Auto-Justificación ---
-        # Si se actualiza el contacto y no hay justificación manual, la creamos.
-        # Esto permite que el checklist funcione sin pedir input al usuario.
-        if 'contacted' in validated_data and not justification:
-            val_str = "Sí" if validated_data['contacted'] else "No"
-            justification = f"Actualización rápida de contacto a: {val_str}"
-
-        # Si aún no hay justificación (y no es el caso especial anterior), lanzamos error.
         if not justification:
-            raise serializers.ValidationError({"justification": "La justificación es obligatoria para auditar cambios."})
+            raise serializers.ValidationError({"justification": "La justificación es obligatoria."})
 
         changes = {}
         for field, value in validated_data.items():

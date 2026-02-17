@@ -16,6 +16,7 @@ const VolunteerForm = ({
 }) => {
   const { user } = useContext(AuthContext);
   const isEditing = !!idToEdit;
+  // isReadOnly es TRUE si no eres admin y estás editando/viendo, o si se pasó readOnlyMode explícitamente
   const isReadOnly = isEditing && (!user?.isAdmin || readOnlyMode);
 
   const {
@@ -101,8 +102,10 @@ const VolunteerForm = ({
     }
   };
 
+  // CAMBIO AQUÍ: Se muestra si eres Admin O si ya estás viendo/editando un registro existente.
+  // (Para usuarios normales creando uno nuevo, se oculta para no confundir).
   const showDictamen =
-    user?.isAdmin &&
+    (user?.isAdmin || isEditing) &&
     ["En espera por aprobación", "Apto", "Rechazado"].includes(
       currentStatus || "En espera por aprobación",
     );
@@ -208,11 +211,10 @@ const VolunteerForm = ({
                   selectedDate={field.value}
                   onChange={field.onChange}
                   disabled={isReadOnly}
-                  error={errors.birth_date ? errors.birth_date.message : null} // Pasamos el error al componente
+                  error={errors.birth_date ? errors.birth_date.message : null}
                 />
               )}
             />
-            {/* CustomDatePicker ya debería manejar el mensaje visualmente, pero si no, el helperText lo hará */}
           </div>
 
           {/* SEXO */}
@@ -283,7 +285,7 @@ const VolunteerForm = ({
                 <select
                   {...register("manual_status")}
                   disabled={isReadOnly}
-                  className="w-full p-2 border border-purple-300 rounded mt-1 bg-white outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full p-2 border border-purple-300 rounded mt-1 bg-white outline-none focus:ring-1 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-500"
                 >
                   <option value="waiting_approval">
                     En espera por aprobación
@@ -302,7 +304,7 @@ const VolunteerForm = ({
                   type="text"
                   {...register("status_reason")}
                   disabled={isReadOnly}
-                  className="w-full p-2 border border-purple-300 rounded mt-1 outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full p-2 border border-purple-300 rounded mt-1 outline-none focus:ring-1 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-500"
                   placeholder={
                     manualStatus === "rejected"
                       ? "Ej: No pasó prueba médica"

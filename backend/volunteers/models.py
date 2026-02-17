@@ -18,7 +18,7 @@ class Volunteer(models.Model):
     
     # La fecha puede ser nula
     birth_date = models.DateField(blank=True, null=True)
-    contacted = models.BooleanField(default=False, verbose_name="Contactado por WhatsApp")
+    
     SEX_CHOICES = [('M', 'Masculino'), ('F', 'Femenino')]
     sex = models.CharField(max_length=1, choices=SEX_CHOICES, blank=True, null=True)
     
@@ -44,6 +44,9 @@ class Volunteer(models.Model):
     ]
     manual_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting_approval')
     status_reason = models.TextField(blank=True, null=True)
+    
+    # NUEVO CAMPO SOLICITADO
+    contacted = models.BooleanField(default=False, verbose_name="Contactado")
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
