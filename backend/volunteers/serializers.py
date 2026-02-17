@@ -30,9 +30,9 @@ class VolunteerSerializer(serializers.ModelSerializer):
         model = Volunteer
         fields = [
             'id', 'code', 'first_name', 'middle_name', 'last_name_paternal', 
-            'last_name_maternal', 'sex', 'phone', 'curp', 'birth_date', 'age', # Agregamos birth_date y age
+            'last_name_maternal', 'sex', 'phone', 'curp', 'birth_date', 'age',
             'created_at', 'participations', 'status', 'active_study', 'last_study',
-            'manual_status', 'status_reason',
+            'manual_status', 'status_reason', 'contacted', # <-- AGREGADO
             'justification', 'initial_study_id', 'initial_admission_date'
         ]
         read_only_fields = ['code', 'age']

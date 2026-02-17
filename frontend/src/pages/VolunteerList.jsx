@@ -26,6 +26,9 @@ import {
   AlertTriangle,
   CheckCircle,
   ChevronDown,
+  Phone,
+  PhoneOff,
+  CheckSquare,
 } from "lucide-react";
 import Modal from "../components/Modal";
 import SmartTable from "../components/SmartTable";
@@ -120,6 +123,9 @@ const VolunteerList = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
+  // NUEVO: Estado para almacenar IDs seleccionados
+  const [selectedVolunteers, setSelectedVolunteers] = useState([]);
+
   // --- CARGA DE DATOS ---
   const fetchVolunteers = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -155,6 +161,33 @@ const VolunteerList = () => {
     const intervalId = setInterval(() => fetchVolunteers(true), 5000);
     return () => clearInterval(intervalId);
   }, [fetchVolunteers]);
+
+  // --- LÓGICA DE TOGGLE CONTACTADO ---
+  const toggleContacted = useCallback(async (row) => {
+    setVolunteers((prev) =>
+      prev.map((v) =>
+        v.id === row.id ? { ...v, contacted: !v.contacted } : v,
+      ),
+    );
+
+    try {
+      await api.patch(`volunteers/${row.id}/`, {
+        contacted: !row.contacted,
+        justification: "Cambio rápido de estatus 'Contactado' (Toggle)",
+      });
+    } catch (error) {
+      console.error("Error al actualizar contactado:", error);
+      setVolunteers((prev) =>
+        prev.map((v) =>
+          v.id === row.id ? { ...v, contacted: row.contacted } : v,
+        ),
+      );
+      alert(
+        "No se pudo actualizar el estatus. " +
+          (error.response?.data?.detail || error.message),
+      );
+    }
+  }, []);
 
   const activeVolunteer = useMemo(() => {
     if (!showHistoryFor) return null;
@@ -276,20 +309,38 @@ const VolunteerList = () => {
     }
   };
 
-  // --- EXPORTAR DATOS (Con soporte para pestañas) ---
   const handleExportData = async (filterType = "todos") => {
     try {
-      // Si filterType es 'current', usamos el activeTab. Si no, usamos 'todos'.
-      const tabParam = filterType === "current" ? activeTab : "todos";
+      // Lógica modificada para soportar selección múltiple
+      let queryStr = "";
 
-      const response = await api.get(`volunteers/export/?tab=${tabParam}`, {
+      if (filterType === "selected") {
+        if (selectedVolunteers.length === 0) {
+          alert("No has seleccionado ningún voluntario.");
+          return;
+        }
+        queryStr = `ids=${selectedVolunteers.join(",")}`;
+      } else {
+        const tabParam = filterType === "current" ? activeTab : "todos";
+        queryStr = `tab=${tabParam}`;
+      }
+
+      const response = await api.get(`volunteers/export/?${queryStr}`, {
         responseType: "blob",
       });
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `voluntarios_${tabParam}.xlsx`);
+
+      const fileNameSuffix =
+        filterType === "selected"
+          ? "seleccionados"
+          : filterType === "current"
+            ? activeTab
+            : "todos";
+      link.setAttribute("download", `voluntarios_${fileNameSuffix}.xlsx`);
+
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -333,113 +384,157 @@ const VolunteerList = () => {
     return Array.from(options).sort();
   }, [volunteers]);
 
-  const columns = [
-    {
-      key: "code",
-      label: "Código",
-      width: "120px",
-      sortable: true,
-      customSort: (a, b) => {
-        if (a.code_year_filter !== b.code_year_filter)
-          return b.code_year_filter.localeCompare(a.code_year_filter);
-        return a.code_number_sort - b.code_number_sort;
-      },
-      render: (row) => (
-        <span className="font-mono font-bold text-blue-700">
-          {row.code || "---"}
-        </span>
-      ),
-    },
-    {
-      key: "full_name_search",
-      label: "Nombre Completo",
-      width: "220px",
-      sortable: true,
-      render: (row) => (
-        <div className="flex flex-col justify-center">
-          <span
-            className="font-medium text-gray-900 truncate"
-            title={row.full_name_search}
-          >
-            {row.full_name_search}
+  // --- DEFINICIÓN DINÁMICA DE COLUMNAS ---
+  const columns = useMemo(() => {
+    const baseCols = [
+      {
+        key: "code",
+        label: "Código",
+        width: "120px",
+        sortable: true,
+        customSort: (a, b) => {
+          if (a.code_year_filter !== b.code_year_filter)
+            return b.code_year_filter.localeCompare(a.code_year_filter);
+          return a.code_number_sort - b.code_number_sort;
+        },
+        render: (row) => (
+          <span className="font-mono font-bold text-blue-700">
+            {row.code || "---"}
           </span>
-          <span className="text-xs text-gray-400 truncate">
-            {row.email || ""}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: "history",
-      label: "Historial (Recientes)",
-      width: "200px",
-      filterKey: "study_names_filter",
-      filterOptions: studyOptions,
-      render: (row) => (
-        <ResponsiveStudyTags participations={row.participations} />
-      ),
-    },
-    {
-      key: "active_study",
-      label: "Estudio Actual",
-      width: "140px",
-      render: (row) =>
-        row.active_study ? (
-          <span className="bg-indigo-50 text-indigo-700 text-[11px] px-2 py-1 rounded-md font-semibold border border-indigo-100 block text-center truncate">
-            {row.active_study}
-          </span>
-        ) : (
-          <span className="text-gray-300 text-xs">-</span>
         ),
-    },
-    { key: "age", label: "Edad", width: "70px", sortable: true },
-    {
-      key: "sex",
-      label: "Sexo",
-      width: "60px",
-      filterKey: "sex",
-      defaultHidden: true,
-      filterOptions: ["M", "F"],
-    },
-    { key: "curp", label: "CURP", width: "170px" },
-    { key: "phone", label: "Teléfono", width: "110px" },
-    {
-      key: "status",
-      label: "Estatus",
-      width: "150px",
-      filterKey: "status",
-      filterOptions: [
-        "Apto",
-        "En estudio",
-        "Estudio asignado",
-        "En espera por aprobación",
-        "En espera (Descanso)",
-        "Rechazado",
-      ],
-      render: (row) => {
-        const s = row.status || "";
-        let style = "bg-gray-100 text-gray-600 border-gray-200";
-        if (s === "Apto") style = "bg-green-50 text-green-700 border-green-200";
-        else if (s === "En estudio")
-          style = "bg-indigo-50 text-indigo-700 border-indigo-200";
-        else if (s === "Estudio asignado")
-          style = "bg-violet-50 text-violet-700 border-violet-200";
-        else if (s === "En espera por aprobación")
-          style = "bg-orange-50 text-orange-700 border-orange-200";
-        else if (s === "En espera (Descanso)")
-          style = "bg-teal-50 text-teal-700 border-teal-200";
-        else if (s.includes("Rechazado") || s.includes("No elegible"))
-          style = "bg-red-50 text-red-700 border-red-200";
-        return (
-          <span
-            className={`px-2 py-1 rounded-full text-[10px] font-bold border ${style} block text-center truncate`}
-          >
-            {s}
-          </span>
-        );
       },
-    },
-    {
+      {
+        key: "full_name_search",
+        label: "Nombre Completo",
+        width: "220px",
+        sortable: true,
+        render: (row) => (
+          <div className="flex flex-col justify-center">
+            <span
+              className="font-medium text-gray-900 truncate"
+              title={row.full_name_search}
+            >
+              {row.full_name_search}
+            </span>
+            <span className="text-xs text-gray-400 truncate">
+              {row.email || ""}
+            </span>
+          </div>
+        ),
+      },
+      {
+        key: "history",
+        label: "Historial",
+        width: "180px",
+        filterKey: "study_names_filter",
+        filterOptions: studyOptions,
+        render: (row) => (
+          <ResponsiveStudyTags participations={row.participations} />
+        ),
+      },
+      {
+        key: "last_study",
+        label: "Último Estudio",
+        width: "140px",
+        defaultHidden: activeTab !== "descanso",
+        render: (row) => (
+          <span className="text-sm text-gray-600">{row.last_study || "-"}</span>
+        ),
+      },
+      {
+        key: "active_study",
+        label: "Estudio Actual",
+        width: "140px",
+        render: (row) =>
+          row.active_study ? (
+            <span className="bg-indigo-50 text-indigo-700 text-[11px] px-2 py-1 rounded-md font-semibold border border-indigo-100 block text-center truncate">
+              {row.active_study}
+            </span>
+          ) : (
+            <span className="text-gray-300 text-xs">-</span>
+          ),
+      },
+      { key: "age", label: "Edad", width: "70px", sortable: true },
+      {
+        key: "sex",
+        label: "Sexo",
+        width: "60px",
+        filterKey: "sex",
+        defaultHidden: true,
+        filterOptions: ["M", "F"],
+      },
+      { key: "curp", label: "CURP", width: "170px" },
+      { key: "phone", label: "Teléfono", width: "110px" },
+      {
+        key: "status",
+        label: "Estatus",
+        width: "150px",
+        filterKey: "status",
+        filterOptions: [
+          "Apto",
+          "En estudio",
+          "Estudio asignado",
+          "En espera por aprobación",
+          "En espera (Descanso)",
+          "Rechazado",
+        ],
+        render: (row) => {
+          const s = row.status || "";
+          let style = "bg-gray-100 text-gray-600 border-gray-200";
+          if (s === "Apto")
+            style = "bg-green-50 text-green-700 border-green-200";
+          else if (s === "En estudio")
+            style = "bg-indigo-50 text-indigo-700 border-indigo-200";
+          else if (s === "Estudio asignado")
+            style = "bg-violet-50 text-violet-700 border-violet-200";
+          else if (s === "En espera por aprobación")
+            style = "bg-orange-50 text-orange-700 border-orange-200";
+          else if (s === "En espera (Descanso)")
+            style = "bg-teal-50 text-teal-700 border-teal-200";
+          else if (s.includes("Rechazado") || s.includes("No elegible"))
+            style = "bg-red-50 text-red-700 border-red-200";
+          return (
+            <span
+              className={`px-2 py-1 rounded-full text-[10px] font-bold border ${style} block text-center truncate`}
+            >
+              {s}
+            </span>
+          );
+        },
+      },
+    ];
+
+    if (activeTab === "aptos") {
+      baseCols.push({
+        key: "contacted",
+        label: "Contactado",
+        width: "100px",
+        filterKey: "contacted",
+        filterOptions: [true, false],
+        render: (row) => (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleContacted(row);
+            }}
+            className={`flex justify-center w-full p-1 rounded-full transition-colors ${
+              row.contacted
+                ? "text-green-600 hover:bg-green-100"
+                : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"
+            }`}
+            title={
+              row.contacted
+                ? "Marcar como NO contactado"
+                : "Marcar como Contactado"
+            }
+          >
+            {row.contacted ? <Phone size={18} /> : <PhoneOff size={18} />}
+          </button>
+        ),
+      });
+    }
+
+    baseCols.push({
       key: "actions",
       label: "Acciones",
       width: "110px",
@@ -470,8 +565,10 @@ const VolunteerList = () => {
           </button>
         </div>
       ),
-    },
-  ];
+    });
+
+    return baseCols;
+  }, [activeTab, studyOptions, user?.isAdmin, toggleContacted]);
 
   const FilterTab = ({ id, label, icon: Icon, color, count }) => {
     const isActive = activeTab === id;
@@ -594,9 +691,12 @@ const VolunteerList = () => {
 
       <div className="flex-1">
         <SmartTable
+          key={activeTab}
           title={getTableTitle()}
           data={filteredData}
           columns={columns}
+          // Pasamos la función para capturar la selección
+          onSelectionChange={setSelectedVolunteers}
           actions={
             user?.isAdmin && (
               <div className="flex gap-3">
@@ -650,7 +750,16 @@ const VolunteerList = () => {
                             Exportación
                           </div>
 
-                          {/* OPCIÓN DINÁMICA SEGÚN PESTAÑA */}
+                          {/* BOTÓN NUEVO PARA EXPORTAR SELECCIONADOS */}
+                          <button
+                            onClick={() => handleExportData("selected")}
+                            disabled={selectedVolunteers.length === 0}
+                            className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 rounded-lg transition-colors text-left font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <CheckSquare size={16} />
+                            Exportar Seleccionados ({selectedVolunteers.length})
+                          </button>
+
                           <button
                             onClick={() => handleExportData("current")}
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 rounded-lg transition-colors text-left font-medium"
@@ -683,7 +792,7 @@ const VolunteerList = () => {
         />
       </div>
 
-      {/* MODALES (IMPORTACIÓN, EDICIÓN, HISTORIAL) - SE MANTIENEN IGUALES ... */}
+      {/* MODALES SE MANTIENEN IGUALES */}
       <Modal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}

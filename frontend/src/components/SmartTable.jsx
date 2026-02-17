@@ -10,8 +10,14 @@ import {
   ArrowDown,
 } from "lucide-react";
 
-const SmartTable = ({ data = [], columns = [], title, actions }) => {
-  // Inicialización de columnas visibles (soporta defaultHidden)
+const SmartTable = ({
+  data = [],
+  columns = [],
+  title,
+  actions,
+  onSelectionChange, // Prop nuevo para devolver selección
+}) => {
+  // Inicialización de columnas visibles
   const [visibleColumns, setVisibleColumns] = useState(
     columns.reduce(
       (acc, col) => ({ ...acc, [col.key]: !col.defaultHidden }),
@@ -26,6 +32,9 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
   const [filterSearchTerm, setFilterSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
+  // ESTADO DE SELECCIÓN
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
   // --- LÓGICA DE REDIMENSIONAMIENTO ---
   const [columnWidths, setColumnWidths] = useState(
     columns.reduce((acc, col) => ({ ...acc, [col.key]: col.width || 150 }), {}),
@@ -37,17 +46,13 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
-
-    // Convertir a número para cálculos
     const currentWidthStr = String(columnWidths[colKey]);
     const currentWidth = parseInt(currentWidthStr.replace("px", ""), 10) || 150;
-
     resizingRef.current = {
       colKey,
       startX: e.clientX,
       startWidth: currentWidth,
     };
-
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", stopResizing);
     document.body.style.cursor = "col-resize";
@@ -56,11 +61,9 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
 
   const handleMouseMove = useCallback((e) => {
     if (!resizingRef.current.colKey) return;
-
     const { colKey, startX, startWidth } = resizingRef.current;
     const diff = e.clientX - startX;
-    const newWidth = Math.max(50, startWidth + diff); // Mínimo 50px
-
+    const newWidth = Math.max(50, startWidth + diff);
     setColumnWidths((prev) => ({
       ...prev,
       [colKey]: newWidth,
@@ -147,7 +150,6 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
     // Ordenamiento
     if (sortConfig.key) {
       const colDef = columns.find((c) => c.key === sortConfig.key);
-
       result.sort((a, b) => {
         if (colDef && colDef.customSort) {
           const sortResult = colDef.customSort(a, b);
@@ -155,22 +157,47 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
         }
         const aVal = a[sortConfig.key];
         const bVal = b[sortConfig.key];
-
         if (aVal === bVal) return 0;
         if (aVal === null || aVal === undefined) return 1;
         if (bVal === null || bVal === undefined) return -1;
-
         if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
         return 0;
       });
     }
-
     return result;
   }, [data, search, columnFilters, sortConfig, columns]);
 
+  // --- LÓGICA DE SELECCIÓN ---
+  // Notificar al padre cuando cambie la selección
+  useEffect(() => {
+    if (onSelectionChange) {
+      onSelectionChange(Array.from(selectedIds));
+    }
+  }, [selectedIds, onSelectionChange]);
+
+  const toggleAll = () => {
+    if (selectedIds.size === filteredData.length && filteredData.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      const allIds = filteredData.map((d) => d.id);
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const toggleOne = (id) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
   const visibleColsList = columns.filter((col) => visibleColumns[col.key]);
   const lastVisibleColumnKey = visibleColsList[visibleColsList.length - 1]?.key;
+
   return (
     <div className="bg-white rounded-lg shadow-md border border-gray-200 animate-fade-in pb-4 flex flex-col h-full w-full max-w-full overflow-hidden">
       <div className="p-4 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -230,13 +257,27 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
         className="overflow-x-auto w-full flex-1 min-h-[450px] pb-32"
         ref={filterRef}
       >
-        {/* Agregamos min-w-full para que ocupe todo el ancho disponible */}
         <table
           className="min-w-full text-left border-collapse"
           style={{ tableLayout: "fixed" }}
         >
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-sm uppercase border-b border-gray-200">
+              {/* Checkbox de Seleccionar Todo */}
+              {onSelectionChange && (
+                <th className="p-4 w-12 text-center" style={{ width: "40px" }}>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary"
+                    checked={
+                      filteredData.length > 0 &&
+                      selectedIds.size === filteredData.length
+                    }
+                    onChange={toggleAll}
+                  />
+                </th>
+              )}
+
               {columns.map(
                 (col) =>
                   visibleColumns[col.key] && (
@@ -311,6 +352,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
                       {activeFilterDropdown === col.filterKey &&
                         col.filterOptions && (
                           <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 animate-fade-in flex flex-col max-h-80 cursor-default">
+                            {/* Filtro dropdown logic igual... */}
                             <div className="p-3 border-b border-gray-100 bg-gray-50 rounded-t-lg">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-xs font-bold text-gray-500 uppercase">
@@ -414,7 +456,7 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
             {filteredData.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={columns.length + (onSelectionChange ? 1 : 0)}
                   className="p-8 text-center text-gray-500"
                 >
                   No se encontraron resultados
@@ -424,8 +466,20 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
               filteredData.map((row, idx) => (
                 <tr
                   key={row.id || idx}
-                  className="hover:bg-blue-50 border-b last:border-0 transition-colors group/row"
+                  className={`hover:bg-blue-50 border-b last:border-0 transition-colors group/row ${selectedIds.has(row.id) ? "bg-blue-50/60" : ""}`}
                 >
+                  {/* Checkbox de Fila */}
+                  {onSelectionChange && (
+                    <td className="p-4 text-center">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary"
+                        checked={selectedIds.has(row.id)}
+                        onChange={() => toggleOne(row.id)}
+                      />
+                    </td>
+                  )}
+
                   {columns.map(
                     (col) =>
                       visibleColumns[col.key] && (
@@ -452,8 +506,15 @@ const SmartTable = ({ data = [], columns = [], title, actions }) => {
           </tbody>
         </table>
       </div>
-      <div className="px-4 pt-4 border-t border-gray-200 text-sm text-gray-500 flex justify-between">
-        <span>Total visible: {filteredData.length}</span>
+      <div className="px-4 pt-4 border-t border-gray-200 text-sm text-gray-500 flex justify-between items-center">
+        <div className="flex gap-4">
+          <span>Total visible: {filteredData.length}</span>
+          {onSelectionChange && selectedIds.size > 0 && (
+            <span className="font-bold text-primary">
+              Seleccionados: {selectedIds.size}
+            </span>
+          )}
+        </div>
         <span>Total registros: {Array.isArray(data) ? data.length : 0}</span>
       </div>
     </div>

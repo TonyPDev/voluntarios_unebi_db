@@ -102,23 +102,33 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         else:
             return Response({"error": "El archivo de plantilla no se encuentra en el servidor."}, status=status.HTTP_404_NOT_FOUND)
 
-    # --- EXPORTAR DATOS (FILTRADO POR PESTAÑA) ---
+    # --- EXPORTAR DATOS (MODIFICADO PARA SELECCIÓN MÚLTIPLE) ---
     @action(detail=False, methods=['get'], url_path='export')
     def export_data(self, request):
-        # Leemos el parámetro 'tab' de la URL (ej: export/?tab=aptos)
         target_tab = request.query_params.get('tab', 'todos')
+        ids_param = request.query_params.get('ids', None) # <--- Nuevo parámetro
         
         volunteers = self.get_queryset()
+
+        # Si vienen IDs específicos, filtramos SOLO esos y olvidamos el tab
+        if ids_param:
+            try:
+                ids_list = [int(x) for x in ids_param.split(',') if x.isdigit()]
+                volunteers = volunteers.filter(id__in=ids_list)
+                target_tab = "seleccionados"
+            except ValueError:
+                pass
+
         data = []
 
         for v in volunteers:
             # 1. Calculamos el estatus real
             real_status = self.calculate_status(v)
             
-            # 2. FILTRADO: Si no estamos en "todos", verificamos si el estatus coincide con la pestaña
+            # 2. FILTRADO (Solo si NO estamos filtrando por IDs específicos)
             include_row = True
             
-            if target_tab != 'todos':
+            if not ids_param and target_tab != 'todos':
                 if target_tab == 'aptos' and real_status != "Apto":
                     include_row = False
                 elif target_tab == 'en_estudio' and real_status != "En estudio":
@@ -147,13 +157,13 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                     'CURP': v.curp,
                     'Telefono': v.phone,
                     'Estudios': estudios,
-                    'Estatus Actual': real_status
+                    'Estatus Actual': real_status,
+                    'Contactado': 'Sí' if v.contacted else 'No'
                 }
                 data.append(row)
 
         df = pd.DataFrame(data)
         
-        # Nombre del archivo dinámico
         filename = f"voluntarios_{target_tab}.xlsx"
         
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -223,11 +233,20 @@ class ImportVolunteersView(APIView):
                             continue
 
                     sex_val = clean(row.get('sexo', row.get('sex')))
+                    final_sex = None
+                    
                     if sex_val:
-                        sex_val = sex_val.upper()
-                        if sex_val.startswith('H'): sex_val = 'M'
-                        elif sex_val.startswith('M'): sex_val = 'F'
-                        if sex_val not in ['M', 'F']: sex_val = None
+                        val = sex_val.upper().strip()
+                        if val == 'M': 
+                            final_sex = 'M'
+                        elif val == 'F':
+                            final_sex = 'F'
+                        elif val.startswith('H'):
+                            final_sex = 'M'
+                        elif 'MUJER' in val or 'FEM' in val: 
+                            final_sex = 'F'
+                        elif val.startswith('M'): 
+                            final_sex = 'M'
 
                     birth_date = None
                     raw_date = row.get('fecha nacimiento', row.get('fecha de nacimiento'))
@@ -245,7 +264,7 @@ class ImportVolunteersView(APIView):
                         last_name_paternal=paternal,
                         last_name_maternal=clean(row.get('apellido materno', row.get('last_name_maternal'))),
                         phone=phone,
-                        sex=sex_val,
+                        sex=final_sex,
                         curp=curp,
                         birth_date=birth_date,
                         manual_status='waiting_approval'
