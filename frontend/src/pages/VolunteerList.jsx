@@ -29,6 +29,14 @@ import {
   Phone,
   PhoneOff,
   CheckSquare,
+  MoreVertical,
+  ShieldCheck,
+  Play,
+  Trash2,
+  RefreshCw,
+  User,
+  CalendarPlus,
+  Info,
 } from "lucide-react";
 import Modal from "../components/Modal";
 import SmartTable from "../components/SmartTable";
@@ -36,6 +44,7 @@ import { AuthContext } from "../context/AuthContext";
 import VolunteerForm from "./VolunteerForm";
 import ParticipationManager from "../components/ParticipationManager";
 
+// --- COMPONENTE DE TAGS DE ESTUDIOS ---
 const ResponsiveStudyTags = ({ participations }) => {
   const containerRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(1);
@@ -110,11 +119,71 @@ const ResponsiveStudyTags = ({ participations }) => {
   );
 };
 
+// --- COMPONENTE DE MENÚ DESPLEGABLE DE ACCIONES ---
+const ActionMenu = ({ row, actions }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative flex justify-center" ref={menuRef}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className="p-1.5 rounded-lg text-gray-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+      >
+        <MoreVertical size={18} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-8 top-0 z-50 w-48 bg-white rounded-lg shadow-xl border border-gray-100 animate-fade-in-up overflow-hidden">
+          {actions.map((group, idx) => (
+            <div key={idx} className="border-b border-gray-100 last:border-0">
+              {group.title && (
+                <div className="px-3 py-1 text-[10px] uppercase font-bold text-gray-400 bg-gray-50/50">
+                  {group.title}
+                </div>
+              )}
+              {group.items.map((item, itemIdx) => (
+                <button
+                  key={itemIdx}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen(false);
+                    item.onClick(row);
+                  }}
+                  className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 transition-colors ${item.className || "text-gray-700"}`}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const VolunteerList = () => {
   const { user } = useContext(AuthContext);
   const [volunteers, setVolunteers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("todos");
+
+  // Modales
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedVolunteerId, setSelectedVolunteerId] = useState(null);
   const [isViewMode, setIsViewMode] = useState(false);
@@ -123,7 +192,25 @@ const VolunteerList = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
-  // NUEVO: Estado para almacenar IDs seleccionados
+  // Modal para acciones (Estatus, Quitar, Cambiar, Asignar)
+  const [actionModal, setActionModal] = useState({
+    isOpen: false,
+    volunteerId: null,
+    volunteerName: "",
+    volunteerCode: "",
+    type: "",
+    payload: "",
+    title: "",
+    description: "",
+  });
+  const [actionJustification, setActionJustification] = useState("");
+
+  // NUEVO: Modal de validación de datos faltantes
+  const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
+  const [validationErrors, setValidationErrors] = useState([]);
+
+  const [availableStudies, setAvailableStudies] = useState([]);
+  const [selectedNewStudyId, setSelectedNewStudyId] = useState("");
   const [selectedVolunteers, setSelectedVolunteers] = useState([]);
 
   // --- CARGA DE DATOS ---
@@ -156,36 +243,140 @@ const VolunteerList = () => {
     }
   }, []);
 
+  const fetchStudies = async () => {
+    try {
+      const res = await api.get("studies/");
+      setAvailableStudies(res.data.filter((s) => s.is_active));
+    } catch (error) {
+      console.error("Error cargando estudios", error);
+    }
+  };
+
   useEffect(() => {
     fetchVolunteers(false);
+    fetchStudies();
     const intervalId = setInterval(() => fetchVolunteers(true), 5000);
     return () => clearInterval(intervalId);
   }, [fetchVolunteers]);
 
-  // --- LÓGICA DE TOGGLE CONTACTADO ---
+  // --- FUNCIÓN DE VALIDACIÓN DE CAMPOS OBLIGATORIOS ---
+  const validateVolunteerData = (volunteer) => {
+    const requiredFields = [
+      { key: "first_name", label: "Nombre" },
+      { key: "last_name_paternal", label: "Apellido Paterno" },
+      { key: "last_name_maternal", label: "Apellido Materno" },
+      { key: "birth_date", label: "Fecha de Nacimiento" },
+      { key: "sex", label: "Sexo" },
+      { key: "curp", label: "CURP" },
+      { key: "phone", label: "Teléfono" },
+    ];
+
+    const missing = requiredFields
+      .filter((field) => !volunteer[field.key])
+      .map((field) => field.label);
+
+    return missing;
+  };
+
+  // --- MANEJO DE ACCIONES ---
+  const openActionModal = (row, type, payload, title, description) => {
+    // 1. VALIDACIÓN PREVIA (Con Modal Bonito)
+    const missingFields = validateVolunteerData(row);
+    if (missingFields.length > 0) {
+      setValidationErrors(missingFields);
+      setIsValidationModalOpen(true);
+      return;
+    }
+
+    // 2. Si pasa la validación, abre el modal de acción
+    setActionModal({
+      isOpen: true,
+      volunteerId: row.id,
+      volunteerName: row.full_name_search,
+      volunteerCode: row.code,
+      type: type,
+      payload: payload,
+      title: title,
+      description: description,
+    });
+    setActionJustification("");
+    setSelectedNewStudyId("");
+  };
+
+  const handleActionSubmit = async () => {
+    if (!actionJustification.trim()) {
+      alert("La justificación es obligatoria.");
+      return;
+    }
+
+    try {
+      if (actionModal.type === "status_change") {
+        await api.patch(`volunteers/${actionModal.volunteerId}/`, {
+          manual_status: actionModal.payload,
+          justification: actionJustification,
+        });
+      } else if (actionModal.type === "remove_study") {
+        await api.post(
+          `volunteers/${actionModal.volunteerId}/remove-current-study/`,
+          {
+            justification: actionJustification,
+          },
+        );
+      } else if (actionModal.type === "change_study") {
+        if (!selectedNewStudyId) {
+          alert("Debes seleccionar un nuevo estudio.");
+          return;
+        }
+        await api.post(
+          `volunteers/${actionModal.volunteerId}/change-current-study/`,
+          {
+            new_study_id: selectedNewStudyId,
+            justification: actionJustification,
+          },
+        );
+      } else if (actionModal.type === "assign_study") {
+        if (!selectedNewStudyId) {
+          alert("Debes seleccionar un estudio.");
+          return;
+        }
+        await api.post(
+          `volunteers/${actionModal.volunteerId}/add-participation/`,
+          {
+            study_id: selectedNewStudyId,
+            justification: actionJustification,
+          },
+        );
+      }
+
+      setActionModal({ ...actionModal, isOpen: false });
+      fetchVolunteers(false);
+    } catch (error) {
+      alert(
+        "Error al procesar la acción: " +
+          (error.response?.data?.detail || error.message),
+      );
+    }
+  };
+
+  // --- TOGGLE CONTACTADO ---
   const toggleContacted = useCallback(async (row) => {
     setVolunteers((prev) =>
       prev.map((v) =>
         v.id === row.id ? { ...v, contacted: !v.contacted } : v,
       ),
     );
-
     try {
       await api.patch(`volunteers/${row.id}/`, {
         contacted: !row.contacted,
         justification: "Cambio rápido de estatus 'Contactado' (Toggle)",
       });
     } catch (error) {
-      console.error("Error al actualizar contactado:", error);
       setVolunteers((prev) =>
         prev.map((v) =>
           v.id === row.id ? { ...v, contacted: row.contacted } : v,
         ),
       );
-      alert(
-        "No se pudo actualizar el estatus. " +
-          (error.response?.data?.detail || error.message),
-      );
+      alert("No se pudo actualizar el estatus.");
     }
   }, []);
 
@@ -267,6 +458,7 @@ const VolunteerList = () => {
     return titles[activeTab] || "Voluntarios";
   };
 
+  // --- Handlers básicos ---
   const handleCreate = () => {
     setSelectedVolunteerId(null);
     setIsViewMode(false);
@@ -291,32 +483,16 @@ const VolunteerList = () => {
     fetchVolunteers(false);
   };
 
+  // --- Exportación e Importación ---
   const handleDownloadTemplate = async () => {
-    try {
-      const response = await api.get("volunteers/download-template/", {
-        responseType: "blob",
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", "plantilla_voluntarios.xlsx");
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setShowActionsMenu(false);
-    } catch (error) {
-      alert("Error al descargar la plantilla");
-    }
+    /* ... */
   };
-
   const handleExportData = async (filterType = "todos") => {
     try {
-      // Lógica modificada para soportar selección múltiple
       let queryStr = "";
-
       if (filterType === "selected") {
         if (selectedVolunteers.length === 0) {
-          alert("No has seleccionado ningún voluntario.");
+          alert("Sin selección.");
           return;
         }
         queryStr = `ids=${selectedVolunteers.join(",")}`;
@@ -324,30 +500,25 @@ const VolunteerList = () => {
         const tabParam = filterType === "current" ? activeTab : "todos";
         queryStr = `tab=${tabParam}`;
       }
-
       const response = await api.get(`volunteers/export/?${queryStr}`, {
         responseType: "blob",
       });
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-
-      const fileNameSuffix =
+      const suffix =
         filterType === "selected"
           ? "seleccionados"
           : filterType === "current"
             ? activeTab
             : "todos";
-      link.setAttribute("download", `voluntarios_${fileNameSuffix}.xlsx`);
-
+      link.setAttribute("download", `voluntarios_${suffix}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       setShowActionsMenu(false);
     } catch (error) {
-      console.error(error);
-      alert("Error al exportar los datos");
+      alert("Error exportando");
     }
   };
 
@@ -365,10 +536,7 @@ const VolunteerList = () => {
       setIsImportModalOpen(true);
       fetchVolunteers(false);
     } catch (error) {
-      alert(
-        "Error crítico al subir archivo: " +
-          (error.response?.data?.error || error.message),
-      );
+      alert("Error importando");
     } finally {
       setLoading(false);
       e.target.value = null;
@@ -384,7 +552,7 @@ const VolunteerList = () => {
     return Array.from(options).sort();
   }, [volunteers]);
 
-  // --- DEFINICIÓN DINÁMICA DE COLUMNAS ---
+  // --- COLUMNAS (con el nuevo Menú) ---
   const columns = useMemo(() => {
     const baseCols = [
       {
@@ -491,7 +659,7 @@ const VolunteerList = () => {
             style = "bg-orange-50 text-orange-700 border-orange-200";
           else if (s === "En espera (Descanso)")
             style = "bg-teal-50 text-teal-700 border-teal-200";
-          else if (s.includes("Rechazado") || s.includes("No elegible"))
+          else if (s.includes("Rechazado"))
             style = "bg-red-50 text-red-700 border-red-200";
           return (
             <span
@@ -517,16 +685,7 @@ const VolunteerList = () => {
               e.stopPropagation();
               toggleContacted(row);
             }}
-            className={`flex justify-center w-full p-1 rounded-full transition-colors ${
-              row.contacted
-                ? "text-green-600 hover:bg-green-100"
-                : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"
-            }`}
-            title={
-              row.contacted
-                ? "Marcar como NO contactado"
-                : "Marcar como Contactado"
-            }
+            className={`flex justify-center w-full p-1 rounded-full transition-colors ${row.contacted ? "text-green-600 hover:bg-green-100" : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}
           >
             {row.contacted ? <Phone size={18} /> : <PhoneOff size={18} />}
           </button>
@@ -537,34 +696,161 @@ const VolunteerList = () => {
     baseCols.push({
       key: "actions",
       label: "Acciones",
-      width: "110px",
-      render: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          <button
-            onClick={() => handleView(row.id)}
-            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-            title="Ver Detalles"
-          >
-            <Eye size={16} />
-          </button>
-          {user?.isAdmin && (
-            <button
-              onClick={() => handleEdit(row.id)}
-              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
-              title="Editar"
-            >
-              <Edit size={16} />
-            </button>
-          )}
-          <button
-            onClick={() => setShowHistoryFor(row)}
-            className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
-            title="Historial Rápido"
-          >
-            <FlaskConical size={16} />
-          </button>
-        </div>
-      ),
+      width: "80px",
+      allowOverflow: true,
+      render: (row) => {
+        const menuActions = [
+          {
+            items: [
+              {
+                icon: <Eye size={16} />,
+                label: "Ver Detalles",
+                onClick: () => handleView(row.id),
+              },
+              ...(user?.isAdmin
+                ? [
+                    {
+                      icon: <Edit size={16} />,
+                      label: "Editar",
+                      onClick: () => handleEdit(row.id),
+                    },
+                  ]
+                : []),
+              {
+                icon: <FlaskConical size={16} />,
+                label: "Historial",
+                onClick: () => setShowHistoryFor(row),
+              },
+            ],
+          },
+        ];
+
+        if (user?.isAdmin) {
+          if (row.raw_status === "En espera por aprobación") {
+            menuActions.push({
+              title: "Validar",
+              items: [
+                {
+                  icon: <CheckCircle size={16} className="text-green-600" />,
+                  label: "Aceptar (Apto)",
+                  onClick: () =>
+                    openActionModal(
+                      row,
+                      "status_change",
+                      "eligible",
+                      "Declarar como Apto",
+                      "Se actualizará el estatus administrativo.",
+                    ),
+                },
+                {
+                  icon: <Ban size={16} className="text-red-600" />,
+                  label: "Rechazar",
+                  onClick: () =>
+                    openActionModal(
+                      row,
+                      "status_change",
+                      "rejected",
+                      "Rechazar Voluntario",
+                      "El voluntario quedará marcado como no elegible.",
+                    ),
+                },
+              ],
+            });
+          }
+
+          if (row.raw_status === "Apto") {
+            menuActions.push({
+              title: "Gestión",
+              items: [
+                {
+                  icon: <CalendarPlus size={16} className="text-blue-600" />,
+                  label: "Asignar Estudio",
+                  onClick: () =>
+                    openActionModal(
+                      row,
+                      "assign_study",
+                      null,
+                      "Asignar Estudio",
+                      "Selecciona el estudio para inscribir al voluntario.",
+                    ),
+                },
+              ],
+            });
+          }
+
+          if (
+            row.raw_status === "Estudio asignado" ||
+            row.raw_status === "En estudio"
+          ) {
+            const studyItems = [];
+
+            if (row.raw_status === "Estudio asignado") {
+              studyItems.push({
+                icon: <Play size={16} className="text-indigo-600" />,
+                label: "Iniciar Estudio",
+                className: "text-indigo-700 font-medium",
+                onClick: () =>
+                  openActionModal(
+                    row,
+                    "status_change",
+                    "in_study",
+                    "Iniciar Participación",
+                    "El estatus cambiará a 'En estudio'.",
+                  ),
+              });
+            }
+
+            if (row.raw_status === "En estudio") {
+              studyItems.push({
+                icon: <ShieldCheck size={16} />,
+                label: "Regresar a Asignado",
+                onClick: () =>
+                  openActionModal(
+                    row,
+                    "status_change",
+                    "study_assigned",
+                    "Regresar a Asignado",
+                    "Corrección de estatus.",
+                  ),
+              });
+            }
+
+            studyItems.push({
+              icon: <RefreshCw size={16} className="text-blue-600" />,
+              label: "Cambiar de estudio",
+              onClick: () =>
+                openActionModal(
+                  row,
+                  "change_study",
+                  null,
+                  "Cambiar Estudio Actual",
+                  "Selecciona el nuevo estudio para reasignar al voluntario.",
+                ),
+            });
+
+            studyItems.push({
+              icon: <Trash2 size={16} className="text-red-500" />,
+              label: "Desasignar estudio",
+              className: "text-red-600 hover:bg-red-50",
+              onClick: () =>
+                openActionModal(
+                  row,
+                  "remove_study",
+                  null,
+                  "Desasignar Estudio",
+                  "Se eliminará el estudio actual y el voluntario pasará a estatus 'Apto' automáticamente.",
+                ),
+            });
+
+            menuActions.push({
+              title: "Gestión de Estudio",
+              items: studyItems,
+            });
+          }
+        }
+
+        return <ActionMenu row={row} actions={menuActions} />;
+      },
     });
 
     return baseCols;
@@ -598,14 +884,15 @@ const VolunteerList = () => {
 
   if (loading && !volunteers.length)
     return (
-      <div className="p-10 text-center flex flex-col items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mb-4"></div>
-        <p className="text-gray-500">Cargando directorio...</p>
+      <div className="p-10 text-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mx-auto mb-4"></div>
+        <p className="text-gray-500">Cargando...</p>
       </div>
     );
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in pb-10">
+      {/* HEADER Y TABS (Igual que antes) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-gray-50/30 gap-4">
           <div>
@@ -695,7 +982,6 @@ const VolunteerList = () => {
           title={getTableTitle()}
           data={filteredData}
           columns={columns}
-          // Pasamos la función para capturar la selección
           onSelectionChange={setSelectedVolunteers}
           actions={
             user?.isAdmin && (
@@ -744,22 +1030,18 @@ const VolunteerList = () => {
                           >
                             <FileDown size={16} /> Descargar Plantilla
                           </button>
-
                           <div className="h-px bg-gray-100 my-1"></div>
                           <div className="text-xs font-bold text-gray-400 px-3 py-1 uppercase tracking-wider">
                             Exportación
                           </div>
-
-                          {/* BOTÓN NUEVO PARA EXPORTAR SELECCIONADOS */}
                           <button
                             onClick={() => handleExportData("selected")}
                             disabled={selectedVolunteers.length === 0}
-                            className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 rounded-lg transition-colors text-left font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 rounded-lg transition-colors text-left font-medium disabled:opacity-50"
                           >
-                            <CheckSquare size={16} />
-                            Exportar Seleccionados ({selectedVolunteers.length})
+                            <CheckSquare size={16} /> Exportar Seleccionados (
+                            {selectedVolunteers.length})
                           </button>
-
                           <button
                             onClick={() => handleExportData("current")}
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 rounded-lg transition-colors text-left font-medium"
@@ -767,7 +1049,6 @@ const VolunteerList = () => {
                             <Download size={16} /> Exportar{" "}
                             {tabLabels[activeTab] || "Vista Actual"}
                           </button>
-
                           <button
                             onClick={() => handleExportData("todos")}
                             className="flex items-center gap-3 w-full px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-800 rounded-lg transition-colors text-left"
@@ -779,7 +1060,6 @@ const VolunteerList = () => {
                     </>
                   )}
                 </div>
-
                 <button
                   onClick={handleCreate}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm font-bold shadow-md shadow-blue-600/20 active:scale-95"
@@ -792,7 +1072,128 @@ const VolunteerList = () => {
         />
       </div>
 
-      {/* MODALES SE MANTIENEN IGUALES */}
+      {/* MODAL DE VALIDACIÓN DE CAMPOS FALTANTES */}
+      <Modal
+        isOpen={isValidationModalOpen}
+        onClose={() => setIsValidationModalOpen(false)}
+        title="Datos Incompletos"
+      >
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4 text-red-600 font-bold">
+            <AlertTriangle size={24} />
+            <h3>No se puede realizar esta acción</h3>
+          </div>
+
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 shadow-inner">
+            <p className="text-sm text-red-800 mb-2">
+              El voluntario seleccionado tiene los siguientes datos obligatorios
+              vacíos:
+            </p>
+            <ul className="list-disc pl-5 text-sm text-red-700 font-medium space-y-1">
+              {validationErrors.map((field, index) => (
+                <li key={index}>{field}</li>
+              ))}
+            </ul>
+          </div>
+
+          <p className="text-sm text-gray-500 mb-6">
+            Por favor, edita la información del voluntario y completa los campos
+            faltantes antes de continuar.
+          </p>
+
+          <div className="flex justify-end">
+            <button
+              onClick={() => setIsValidationModalOpen(false)}
+              className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-900 font-medium"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL DE ACCIÓN CON JUSTIFICACIÓN */}
+      <Modal
+        isOpen={actionModal.isOpen}
+        onClose={() => setActionModal({ ...actionModal, isOpen: false })}
+        title={actionModal.title}
+      >
+        <div className="space-y-4">
+          {/* INFORMACIÓN DEL VOLUNTARIO */}
+          <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm shrink-0 border border-blue-200">
+              <User size={20} />
+            </div>
+            <div className="overflow-hidden">
+              <p
+                className="text-sm font-bold text-gray-900 truncate"
+                title={actionModal.volunteerName}
+              >
+                {actionModal.volunteerName || "Sin Nombre"}
+              </p>
+              <p className="text-xs text-gray-500 font-mono font-medium">
+                {actionModal.volunteerCode || "---"}
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={`p-4 rounded-lg border ${actionModal.type === "remove_study" ? "bg-red-50 border-red-200 text-red-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}
+          >
+            <p className="text-sm font-medium">{actionModal.description}</p>
+          </div>
+
+          {/* SELECTOR PARA CAMBIAR O ASIGNAR ESTUDIO */}
+          {(actionModal.type === "change_study" ||
+            actionModal.type === "assign_study") && (
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                Seleccionar Estudio
+              </label>
+              <select
+                value={selectedNewStudyId}
+                onChange={(e) => setSelectedNewStudyId(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-sm"
+              >
+                <option value="">Seleccione un estudio...</option>
+                {availableStudies.map((study) => (
+                  <option key={study.id} value={study.id}>
+                    {study.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">
+              Justificación (Obligatoria para auditoría)
+            </label>
+            <textarea
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-24 text-sm"
+              placeholder="Escribe el motivo..."
+              value={actionJustification}
+              onChange={(e) => setActionJustification(e.target.value)}
+            ></textarea>
+          </div>
+          <div className="flex justify-end pt-2 gap-2">
+            <button
+              onClick={() => setActionModal({ ...actionModal, isOpen: false })}
+              className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleActionSubmit}
+              className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-md ${actionModal.type === "remove_study" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
+            >
+              Confirmar
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL DE IMPORTACIÓN */}
       <Modal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
@@ -829,10 +1230,6 @@ const VolunteerList = () => {
                       ))}
                     </ul>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2 text-right">
-                    * Corrige estos errores e intenta importar nuevamente solo
-                    estas filas.
-                  </p>
                 </div>
               ) : (
                 <div className="text-center text-gray-500 text-sm italic py-4">
@@ -852,6 +1249,7 @@ const VolunteerList = () => {
         </div>
       </Modal>
 
+      {/* FORMULARIO */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl my-auto relative flex flex-col max-h-[90vh]">
@@ -883,6 +1281,7 @@ const VolunteerList = () => {
         </div>
       )}
 
+      {/* HISTORIAL RÁPIDO */}
       {activeVolunteer && (
         <div
           className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[1px]"

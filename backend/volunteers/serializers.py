@@ -20,7 +20,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     last_study = serializers.SerializerMethodField()
     active_study = serializers.SerializerMethodField()
-    age = serializers.IntegerField(read_only=True) # Exponemos la edad calculada
+    age = serializers.IntegerField(read_only=True)
     
     justification = serializers.CharField(write_only=True, required=False)
     initial_study_id = serializers.IntegerField(write_only=True, required=False)
@@ -32,7 +32,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
             'id', 'code', 'first_name', 'middle_name', 'last_name_paternal', 
             'last_name_maternal', 'sex', 'phone', 'curp', 'birth_date', 'age',
             'created_at', 'participations', 'status', 'active_study', 'last_study',
-            'manual_status', 'status_reason', 'contacted', # <-- AGREGADO
+            'manual_status', 'status_reason', 'contacted',
             'justification', 'initial_study_id', 'initial_admission_date'
         ]
         read_only_fields = ['code', 'age']
@@ -48,37 +48,40 @@ class VolunteerSerializer(serializers.ModelSerializer):
     def get_status(self, obj):
         today = date.today()
         
-        # 1. PRIORIDAD MÁXIMA: En estudio activo
+        # 1. EN ESTUDIO ACTIVO
         active_part = obj.participations.filter(study__is_active=True).first()
         if active_part:
-            if active_part.study.admission_date and active_part.study.admission_date > today:
+            # CAMBIO: Ya no comparamos fechas automáticamente.
+            # Dependemos del estatus manual. Si el admin lo puso en 'in_study', es "En estudio".
+            # Si no, asumimos que sigue en etapa de asignación.
+            if obj.manual_status == 'in_study':
+                return "En estudio"
+            else:
                 return "Estudio asignado"
-            return "En estudio"
         
-        # 2. VALIDACIÓN DE EDAD (Mayor a 55 años)
+        # 2. VALIDACIÓN DE EDAD
         if obj.age is not None and obj.age > 55:
             return "No elegible por edad"
 
-        # 3. PERIODO DE LAVADO (Lógica modificada)
+        # 3. PERIODO DE LAVADO
         last_paid = obj.participations.filter(study__payment_date__isnull=False).order_by('-study__payment_date').first()
         
         if last_paid:
             three_months_later = last_paid.study.payment_date + timedelta(days=90)
             
-            # Si la fecha actual es MENOR a los 3 meses -> Sigue en descanso
             if today < three_months_later:
                 return "En espera (Descanso)"
             
-            # NUEVO: Si la fecha actual es MAYOR a los 3 meses -> Pasa a Apto automáticamente
-            # (Siempre y cuando no haya sido rechazado manualmente por otra razón médica)
             elif obj.manual_status != 'rejected':
                 return "Apto"
         
-        # 4. Estatus Administrativo Manual (Fallback)
+        # 4. Fallback Manual
         status_map = {
             'waiting_approval': 'En espera por aprobación',
             'eligible': 'Apto',
-            'rejected': 'Rechazado'
+            'rejected': 'Rechazado',
+            'in_study': 'En estudio', # Aseguramos que el mapeo exista
+            'study_assigned': 'Estudio asignado'
         }
         return status_map.get(obj.manual_status, 'En espera por aprobación')
 
@@ -86,12 +89,16 @@ class VolunteerSerializer(serializers.ModelSerializer):
         study_id = validated_data.pop('initial_study_id', None)
         admission_date = validated_data.pop('initial_admission_date', None)
         
+        # Por defecto, si se crea nuevo, status manual waiting_approval
         volunteer = Volunteer.objects.create(**validated_data)
 
         if study_id:
             try:
                 study = Study.objects.get(pk=study_id)
                 Participation.objects.create(volunteer=volunteer, study=study)
+                # Si se asigna al crear, actualizamos el estatus manual a asignado
+                volunteer.manual_status = 'study_assigned'
+                volunteer.save()
             except Exception:
                 pass 
         

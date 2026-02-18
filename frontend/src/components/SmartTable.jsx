@@ -15,7 +15,7 @@ const SmartTable = ({
   columns = [],
   title,
   actions,
-  onSelectionChange, // Prop nuevo para devolver selección
+  onSelectionChange,
 }) => {
   // Inicialización de columnas visibles
   const [visibleColumns, setVisibleColumns] = useState(
@@ -169,7 +169,6 @@ const SmartTable = ({
   }, [data, search, columnFilters, sortConfig, columns]);
 
   // --- LÓGICA DE SELECCIÓN ---
-  // Notificar al padre cuando cambie la selección
   useEffect(() => {
     if (onSelectionChange) {
       onSelectionChange(Array.from(selectedIds));
@@ -263,7 +262,6 @@ const SmartTable = ({
         >
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-sm uppercase border-b border-gray-200">
-              {/* Checkbox de Seleccionar Todo */}
               {onSelectionChange && (
                 <th className="p-4 w-12 text-center" style={{ width: "40px" }}>
                   <input
@@ -352,7 +350,7 @@ const SmartTable = ({
                       {activeFilterDropdown === col.filterKey &&
                         col.filterOptions && (
                           <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 animate-fade-in flex flex-col max-h-80 cursor-default">
-                            {/* Filtro dropdown logic igual... */}
+                            {/* Filtros Dropdown */}
                             <div className="p-3 border-b border-gray-100 bg-gray-50 rounded-t-lg">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-xs font-bold text-gray-500 uppercase">
@@ -468,7 +466,6 @@ const SmartTable = ({
                   key={row.id || idx}
                   className={`hover:bg-blue-50 border-b last:border-0 transition-colors group/row ${selectedIds.has(row.id) ? "bg-blue-50/60" : ""}`}
                 >
-                  {/* Checkbox de Fila */}
                   {onSelectionChange && (
                     <td className="p-4 text-center">
                       <input
@@ -485,11 +482,15 @@ const SmartTable = ({
                       visibleColumns[col.key] && (
                         <td
                           key={col.key}
-                          className="p-4 text-sm text-gray-700 truncate border-r border-transparent group-hover/row:border-gray-100"
+                          // CORRECCIÓN: Si allowOverflow es true, no aplicamos 'truncate'
+                          className={`p-4 text-sm text-gray-700 border-r border-transparent group-hover/row:border-gray-100 ${col.allowOverflow ? "" : "truncate"}`}
                           style={{
                             maxWidth: columnWidths[col.key],
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
+                            // CORRECCIÓN: Control manual de overflow
+                            overflow: col.allowOverflow ? "visible" : "hidden",
+                            textOverflow: col.allowOverflow
+                              ? "clip"
+                              : "ellipsis",
                             whiteSpace: "nowrap",
                           }}
                           title={

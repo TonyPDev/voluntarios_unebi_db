@@ -35,15 +35,16 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         # 1. En estudio activo
         active_part = volunteer.participations.filter(study__is_active=True).first()
         if active_part:
-            if active_part.study.admission_date and active_part.study.admission_date > today:
+            if volunteer.manual_status == 'in_study':
+                return "En estudio"
+            else:
                 return "Estudio asignado"
-            return "En estudio"
         
         # 2. Edad > 55
         if volunteer.age and volunteer.age > 55:
             return "No elegible por edad"
 
-        # 3. Periodo de Lavado (3 meses)
+        # 3. Periodo de Lavado
         last_paid = volunteer.participations.filter(study__payment_date__isnull=False).order_by('-study__payment_date').first()
         if last_paid:
             three_months_later = last_paid.study.payment_date + timedelta(days=90)
@@ -56,7 +57,9 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         status_map = {
             'waiting_approval': 'En espera por aprobación',
             'eligible': 'Apto',
-            'rejected': 'Rechazado'
+            'rejected': 'Rechazado',
+            'in_study': 'En estudio',
+            'study_assigned': 'Estudio asignado'
         }
         return status_map.get(volunteer.manual_status, 'En espera por aprobación')
 
@@ -80,6 +83,10 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         serializer = ParticipationSerializer(data=data)
         if serializer.is_valid():
             participation = serializer.save()
+            
+            volunteer.manual_status = 'study_assigned'
+            volunteer.save()
+
             AuditLog.objects.create(
                 user=user,
                 action='CREATE',
@@ -90,6 +97,103 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # --- ACCIÓN: DESASIGNAR ESTUDIO ---
+    @action(detail=True, methods=['post'], url_path='remove-current-study')
+    def remove_current_study(self, request, pk=None):
+        volunteer = self.get_object()
+        user = request.user
+        
+        if not user.is_staff:
+             return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
+
+        justification = request.data.get('justification')
+        if not justification:
+            return Response({"detail": "La justificación es requerida para auditoría."}, status=status.HTTP_400_BAD_REQUEST)
+
+        last_participation = volunteer.participations.order_by('-id').first()
+        
+        if not last_participation:
+            return Response({"detail": "No se encontró ningún estudio para eliminar."}, status=status.HTTP_400_BAD_REQUEST)
+
+        study_name = last_participation.study.name
+        
+        # Eliminar la participación
+        last_participation.delete()
+        
+        # Actualizar estatus a 'Apto'
+        previous_status = volunteer.manual_status
+        volunteer.manual_status = 'eligible'
+        volunteer.save()
+
+        AuditLog.objects.create(
+            user=user,
+            action='DELETE',
+            model_affected='Participation',
+            record_id=volunteer.code or str(volunteer.id),
+            changes={
+                'Acción': 'Desasignación de Estudio', 
+                'Estudio Quitado': study_name, 
+                'Estatus Anterior': previous_status,
+                'Nuevo Estatus': 'Apto'
+            },
+            justification=justification
+        )
+        
+        return Response({
+            "detail": "Estudio desasignado correctamente.",
+            "new_status": "Apto"
+        }, status=status.HTTP_200_OK)
+
+    # --- NUEVA ACCIÓN: CAMBIAR DE ESTUDIO ---
+    @action(detail=True, methods=['post'], url_path='change-current-study')
+    def change_current_study(self, request, pk=None):
+        volunteer = self.get_object()
+        user = request.user
+        
+        if not user.is_staff:
+             return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
+
+        justification = request.data.get('justification')
+        new_study_id = request.data.get('new_study_id')
+
+        if not justification or not new_study_id:
+            return Response({"detail": "La justificación y el nuevo estudio son requeridos."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Buscar la participación actual
+        current_participation = volunteer.participations.order_by('-id').first()
+        
+        if not current_participation:
+            return Response({"detail": "El voluntario no tiene un estudio asignado actualmente."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_study = Study.objects.get(pk=new_study_id)
+        except Study.DoesNotExist:
+            return Response({"detail": "El estudio seleccionado no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+        old_study_name = current_participation.study.name
+        
+        # Actualizar la participación existente
+        current_participation.study = new_study
+        current_participation.save()
+
+        # Auditoría
+        AuditLog.objects.create(
+            user=user,
+            action='UPDATE',
+            model_affected='Participation',
+            record_id=volunteer.code or str(volunteer.id),
+            changes={
+                'Acción': 'Cambio de Estudio (Swap)', 
+                'De': old_study_name, 
+                'A': new_study.name
+            },
+            justification=justification
+        )
+        
+        return Response({
+            "detail": f"Estudio cambiado de {old_study_name} a {new_study.name} correctamente."
+        }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='download-template')
     def download_template(self, request):
@@ -102,15 +206,14 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         else:
             return Response({"error": "El archivo de plantilla no se encuentra en el servidor."}, status=status.HTTP_404_NOT_FOUND)
 
-    # --- EXPORTAR DATOS (MODIFICADO PARA SELECCIÓN MÚLTIPLE) ---
+    # --- EXPORTAR DATOS ---
     @action(detail=False, methods=['get'], url_path='export')
     def export_data(self, request):
         target_tab = request.query_params.get('tab', 'todos')
-        ids_param = request.query_params.get('ids', None) # <--- Nuevo parámetro
+        ids_param = request.query_params.get('ids', None)
         
         volunteers = self.get_queryset()
 
-        # Si vienen IDs específicos, filtramos SOLO esos y olvidamos el tab
         if ids_param:
             try:
                 ids_list = [int(x) for x in ids_param.split(',') if x.isdigit()]
@@ -122,10 +225,8 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         data = []
 
         for v in volunteers:
-            # 1. Calculamos el estatus real
             real_status = self.calculate_status(v)
             
-            # 2. FILTRADO (Solo si NO estamos filtrando por IDs específicos)
             include_row = True
             
             if not ids_param and target_tab != 'todos':
@@ -163,12 +264,9 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 data.append(row)
 
         df = pd.DataFrame(data)
-        
         filename = f"voluntarios_{target_tab}.xlsx"
-        
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        
         df.to_excel(response, index=False)
         return response
 
@@ -234,19 +332,13 @@ class ImportVolunteersView(APIView):
 
                     sex_val = clean(row.get('sexo', row.get('sex')))
                     final_sex = None
-                    
                     if sex_val:
                         val = sex_val.upper().strip()
-                        if val == 'M': 
-                            final_sex = 'M'
-                        elif val == 'F':
-                            final_sex = 'F'
-                        elif val.startswith('H'):
-                            final_sex = 'M'
-                        elif 'MUJER' in val or 'FEM' in val: 
-                            final_sex = 'F'
-                        elif val.startswith('M'): 
-                            final_sex = 'M'
+                        if val == 'M': final_sex = 'M'
+                        elif val == 'F': final_sex = 'F'
+                        elif val.startswith('H'): final_sex = 'M'
+                        elif 'MUJER' in val or 'FEM' in val: final_sex = 'F'
+                        elif val.startswith('M'): final_sex = 'M'
 
                     birth_date = None
                     raw_date = row.get('fecha nacimiento', row.get('fecha de nacimiento'))
