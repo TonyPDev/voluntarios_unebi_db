@@ -6,6 +6,7 @@ import {
   useCallback,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 import api from "../api/axios";
 import {
   Edit,
@@ -28,6 +29,7 @@ import {
   ChevronDown,
   Phone,
   PhoneOff,
+  PhoneMissed,
   CheckSquare,
   MoreVertical,
   ShieldCheck,
@@ -37,8 +39,8 @@ import {
   User,
   CalendarPlus,
   Info,
-  RotateCcw, // Nuevo ícono para reevaluación
-  UserX, // Nuevo ícono para edad
+  RotateCcw,
+  UserX,
 } from "lucide-react";
 import Modal from "../components/Modal";
 import SmartTable from "../components/SmartTable";
@@ -46,7 +48,7 @@ import { AuthContext } from "../context/AuthContext";
 import VolunteerForm from "./VolunteerForm";
 import ParticipationManager from "../components/ParticipationManager";
 
-// ... [ResponsiveStudyTags] ... (Mismo código)
+// ... [ResponsiveStudyTags] ... (Sin cambios)
 const ResponsiveStudyTags = ({ participations }) => {
   const containerRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(1);
@@ -121,7 +123,7 @@ const ResponsiveStudyTags = ({ participations }) => {
   );
 };
 
-// ... [ActionMenu] ... (Mismo código)
+// ... [ActionMenu] ... (Sin cambios)
 const ActionMenu = ({ row, actions }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef(null);
@@ -179,6 +181,106 @@ const ActionMenu = ({ row, actions }) => {
   );
 };
 
+// ... [ContactStatusMenu] ... (Sin cambios, pero necesario)
+const ContactStatusMenu = ({ row, onUpdateStatus }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef(null);
+
+  const statusConfig = {
+    not_contacted: {
+      color: "bg-gray-100 text-gray-500 hover:bg-gray-200",
+      icon: <Phone size={14} />,
+      label: "Sin Contactar",
+    },
+    contacted_yes: {
+      color: "bg-green-100 text-green-700 hover:bg-green-200",
+      icon: <Phone size={14} />,
+      label: "Contactado (Sí)",
+    },
+    contacted_no_response: {
+      color: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200",
+      icon: <PhoneMissed size={14} />,
+      label: "No Respondió",
+    },
+    contacted_rejected: {
+      color: "bg-red-100 text-red-700 hover:bg-red-200",
+      icon: <PhoneOff size={14} />,
+      label: "Rechazó",
+    },
+  };
+
+  const currentStatus = statusConfig[row.contacted]
+    ? row.contacted
+    : "not_contacted";
+  const currentConfig = statusConfig[currentStatus];
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleScroll = () => setIsOpen(false);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => window.removeEventListener("scroll", handleScroll, true);
+  }, [isOpen]);
+
+  const toggleMenu = (e) => {
+    e.stopPropagation();
+    if (!isOpen) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 4,
+        left: rect.left,
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
+  const handleSelect = (newStatus) => {
+    setIsOpen(false);
+    onUpdateStatus(row, newStatus);
+  };
+
+  const menuContent = (
+    <div
+      className="fixed inset-0 z-[9999] cursor-default"
+      onClick={() => setIsOpen(false)}
+    >
+      <div
+        className="absolute bg-white rounded-lg shadow-xl border border-gray-100 overflow-hidden animate-fade-in-up w-40"
+        style={{ top: coords.top, left: coords.left }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-3 py-1 text-[10px] uppercase font-bold text-gray-400 bg-gray-50/50">
+          Cambiar Estatus
+        </div>
+        {Object.entries(statusConfig).map(([key, config]) => (
+          <button
+            key={key}
+            onClick={() => handleSelect(key)}
+            className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-gray-50 transition-colors ${currentStatus === key ? "bg-blue-50 text-blue-700 font-bold" : "text-gray-700"}`}
+          >
+            {config.icon}
+            {config.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={toggleMenu}
+        className={`flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all w-full border border-transparent hover:border-black/5 ${currentConfig.color}`}
+      >
+        {currentConfig.icon}
+        <span className="truncate">{currentConfig.label}</span>
+      </button>
+      {isOpen && createPortal(menuContent, document.body)}
+    </>
+  );
+};
+
 const VolunteerList = () => {
   const { user } = useContext(AuthContext);
   const [volunteers, setVolunteers] = useState([]);
@@ -217,35 +319,60 @@ const VolunteerList = () => {
   const [selectedNewStudyId, setSelectedNewStudyId] = useState("");
   const [selectedVolunteers, setSelectedVolunteers] = useState([]);
 
+  // --- MAPEO DE ETIQUETAS PARA BÚSQUEDA ---
+  const contactStatusLabels = useMemo(
+    () => ({
+      not_contacted: "Sin Contactar",
+      contacted_yes: "Contactado (Sí)",
+      contacted_no_response: "No Respondió",
+      contacted_rejected: "Rechazó",
+      false: "Sin Contactar", // Fallback
+      False: "Sin Contactar",
+    }),
+    [],
+  );
+
   // --- CARGA DE DATOS ---
-  const fetchVolunteers = useCallback(async (isBackground = false) => {
-    if (!isBackground) setLoading(true);
-    try {
-      const res = await api.get("volunteers/");
-      const processedData = res.data.map((v) => {
-        const sortedParticipations = [...(v.participations || [])].sort(
-          (a, b) => b.id - a.id,
-        );
-        return {
-          ...v,
-          participations: sortedParticipations,
-          full_name_search:
-            `${v.first_name} ${v.middle_name || ""} ${v.last_name_paternal} ${v.last_name_maternal}`.trim(),
-          study_names_filter: v.participations?.map((p) => p.study_name) || [],
-          raw_status: v.status,
-          creation_date_fmt: new Date(v.created_at).toLocaleDateString(),
-          creation_year_filter: new Date(v.created_at).getFullYear().toString(),
-          code_year_filter: v.code ? v.code.split("-")[1] : "",
-          code_number_sort: v.code ? parseInt(v.code.split("-")[2] || 0) : 0,
-        };
-      });
-      setVolunteers(processedData);
-    } catch (error) {
-      console.error("Error cargando voluntarios", error);
-    } finally {
-      if (!isBackground) setLoading(false);
-    }
-  }, []);
+  const fetchVolunteers = useCallback(
+    async (isBackground = false) => {
+      if (!isBackground) setLoading(true);
+      try {
+        const res = await api.get("volunteers/");
+        const processedData = res.data.map((v) => {
+          const sortedParticipations = [...(v.participations || [])].sort(
+            (a, b) => b.id - a.id,
+          );
+
+          // Calculamos la etiqueta legible para la búsqueda global
+          const contactLabel =
+            contactStatusLabels[v.contacted] || "Sin Contactar";
+
+          return {
+            ...v,
+            participations: sortedParticipations,
+            full_name_search:
+              `${v.first_name} ${v.middle_name || ""} ${v.last_name_paternal} ${v.last_name_maternal}`.trim(),
+            study_names_filter:
+              v.participations?.map((p) => p.study_name) || [],
+            raw_status: v.status,
+            creation_date_fmt: new Date(v.created_at).toLocaleDateString(),
+            creation_year_filter: new Date(v.created_at)
+              .getFullYear()
+              .toString(),
+            code_year_filter: v.code ? v.code.split("-")[1] : "",
+            code_number_sort: v.code ? parseInt(v.code.split("-")[2] || 0) : 0,
+            contacted_label: contactLabel, // Campo nuevo para búsqueda global
+          };
+        });
+        setVolunteers(processedData);
+      } catch (error) {
+        console.error("Error cargando voluntarios", error);
+      } finally {
+        if (!isBackground) setLoading(false);
+      }
+    },
+    [contactStatusLabels],
+  );
 
   const fetchStudies = async () => {
     try {
@@ -381,27 +508,45 @@ const VolunteerList = () => {
     }
   };
 
-  // --- TOGGLE CONTACTADO ---
-  const toggleContacted = useCallback(async (row) => {
-    setVolunteers((prev) =>
-      prev.map((v) =>
-        v.id === row.id ? { ...v, contacted: !v.contacted } : v,
-      ),
-    );
-    try {
-      await api.patch(`volunteers/${row.id}/`, {
-        contacted: !row.contacted,
-        justification: "Cambio rápido de estatus 'Contactado' (Toggle)",
-      });
-    } catch (error) {
+  // --- ACTUALIZACIÓN DE ESTATUS DE CONTACTO ---
+  const updateContactStatus = useCallback(
+    async (row, newStatus) => {
+      const previousStatus = row.contacted;
       setVolunteers((prev) =>
         prev.map((v) =>
-          v.id === row.id ? { ...v, contacted: row.contacted } : v,
+          v.id === row.id
+            ? {
+                ...v,
+                contacted: newStatus,
+                // Actualizamos también la etiqueta para la búsqueda
+                contacted_label: contactStatusLabels[newStatus],
+              }
+            : v,
         ),
       );
-      alert("No se pudo actualizar el estatus.");
-    }
-  }, []);
+
+      try {
+        await api.patch(`volunteers/${row.id}/`, {
+          contacted: newStatus,
+          justification: "Cambio rápido de estatus de contacto",
+        });
+      } catch (error) {
+        setVolunteers((prev) =>
+          prev.map((v) =>
+            v.id === row.id
+              ? {
+                  ...v,
+                  contacted: previousStatus,
+                  contacted_label: contactStatusLabels[previousStatus],
+                }
+              : v,
+          ),
+        );
+        alert("No se pudo actualizar el estatus de contacto.");
+      }
+    },
+    [contactStatusLabels],
+  );
 
   const activeVolunteer = useMemo(() => {
     if (!showHistoryFor) return null;
@@ -424,11 +569,11 @@ const VolunteerList = () => {
         (v) => v.raw_status === "En espera (Descanso)",
       ).length,
       reevaluacion: volunteers.filter((v) => v.raw_status === "Reevaluación")
-        .length, // NUEVO
+        .length,
       edad: volunteers.filter((v) => v.raw_status === "No elegible por edad")
-        .length, // NUEVO
+        .length,
       rechazados: volunteers.filter((v) => v.raw_status.includes("Rechazado"))
-        .length, // MODIFICADO (Ya no incluye edad)
+        .length,
     }),
     [volunteers],
   );
@@ -451,13 +596,13 @@ const VolunteerList = () => {
           (v) => v.raw_status === "En espera (Descanso)",
         );
       case "reevaluacion":
-        return volunteers.filter((v) => v.raw_status === "Reevaluación"); // NUEVO
+        return volunteers.filter((v) => v.raw_status === "Reevaluación");
       case "edad":
         return volunteers.filter(
           (v) => v.raw_status === "No elegible por edad",
-        ); // NUEVO
+        );
       case "rechazados":
-        return volunteers.filter((v) => v.raw_status.includes("Rechazado")); // MODIFICADO
+        return volunteers.filter((v) => v.raw_status.includes("Rechazado"));
       default:
         return volunteers;
     }
@@ -705,11 +850,11 @@ const VolunteerList = () => {
           else if (s === "En espera (Descanso)")
             style = "bg-teal-50 text-teal-700 border-teal-200";
           else if (s === "Reevaluación")
-            style = "bg-cyan-50 text-cyan-700 border-cyan-200"; // NUEVO COLOR
+            style = "bg-cyan-50 text-cyan-700 border-cyan-200";
           else if (s.includes("Rechazado"))
             style = "bg-red-50 text-red-700 border-red-200";
           else if (s.includes("No elegible"))
-            style = "bg-gray-50 text-gray-500 border-gray-200"; // NUEVO COLOR
+            style = "bg-gray-50 text-gray-500 border-gray-200";
           return (
             <span
               className={`px-2 py-1 rounded-full text-[10px] font-bold border ${style} block text-center truncate`}
@@ -721,23 +866,26 @@ const VolunteerList = () => {
       },
     ];
 
-    if (activeTab === "aptos") {
+    // COLUMNA DE CONTACTADO: MODIFICADA
+    if (
+      ["aptos", "rechazados", "por_aprobacion", "reevaluacion"].includes(
+        activeTab,
+      )
+    ) {
       baseCols.push({
         key: "contacted",
         label: "Contactado",
-        width: "100px",
-        filterKey: "contacted",
-        filterOptions: [true, false],
+        width: "140px",
+        // AGREGADO: Configuración de filtrado
+        filterKey: "contacted_label",
+        filterOptions: [
+          "Sin Contactar",
+          "Contactado (Sí)",
+          "No Respondió",
+          "Rechazó",
+        ],
         render: (row) => (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleContacted(row);
-            }}
-            className={`flex justify-center w-full p-1 rounded-full transition-colors ${row.contacted ? "text-green-600 hover:bg-green-100" : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}
-          >
-            {row.contacted ? <Phone size={18} /> : <PhoneOff size={18} />}
-          </button>
+          <ContactStatusMenu row={row} onUpdateStatus={updateContactStatus} />
         ),
       });
     }
@@ -796,7 +944,6 @@ const VolunteerList = () => {
         ];
 
         if (user?.isAdmin) {
-          // PARA PENDIENTES Y REEVALUACIÓN
           if (
             row.raw_status === "En espera por aprobación" ||
             row.raw_status === "Reevaluación"
@@ -928,7 +1075,7 @@ const VolunteerList = () => {
     });
 
     return baseCols;
-  }, [activeTab, studyOptions, user?.isAdmin, toggleContacted]);
+  }, [activeTab, studyOptions, user?.isAdmin, updateContactStatus]);
 
   const FilterTab = ({ id, label, icon: Icon, color, count }) => {
     const isActive = activeTab === id;
@@ -1041,7 +1188,6 @@ const VolunteerList = () => {
             count={counts.descanso}
             color="teal"
           />
-          {/* NUEVAS PESTAÑAS */}
           <FilterTab
             id="reevaluacion"
             label="Reevaluación"
