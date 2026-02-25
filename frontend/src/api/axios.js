@@ -2,7 +2,7 @@ import axios from "axios";
 import { jwtDecode } from "jwt-decode";
 
 // Asegúrate de que esta URL sea la misma que configuraste en el paso anterior (tu IP o localhost)
-const baseURL = "http://192.168.20.196:8000/api/";
+const baseURL = "http://192.168.20.146:8000/api/";
 
 const api = axios.create({
   baseURL: baseURL,

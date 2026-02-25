@@ -16,7 +16,6 @@ const VolunteerForm = ({
 }) => {
   const { user } = useContext(AuthContext);
   const isEditing = !!idToEdit;
-  // isReadOnly es TRUE si no eres admin y estás editando/viendo, o si se pasó readOnlyMode explícitamente
   const isReadOnly = isEditing && (!user?.isAdmin || readOnlyMode);
 
   const {
@@ -76,15 +75,25 @@ const VolunteerForm = ({
       delete payload.initial_admission_date;
     }
 
+    // VALIDACIÓN ESPECÍFICA PARA RECHAZOS
+    if (payload.manual_status === "rejected") {
+      if (!payload.rejection_category) {
+        setServerError("Selecciona una categoría de rechazo.");
+        return;
+      }
+      if (!payload.status_reason) {
+        setServerError("Debes escribir las observaciones del rechazo.");
+        return;
+      }
+    }
+
+    // VALIDACIÓN PARA APTOS (Solo observaciones si quieren, no obligatorio, pero justificación sí)
     if (
-      (payload.manual_status === "rejected" ||
-        payload.manual_status === "eligible") &&
-      !payload.status_reason
+      payload.manual_status === "eligible" &&
+      !payload.justification &&
+      isEditing
     ) {
-      setServerError(
-        "Debes escribir un motivo para el estatus seleccionado (Apto o Rechazado).",
-      );
-      return;
+      // La justificación es validada por el backend, pero buena práctica checar aquí
     }
 
     try {
@@ -102,15 +111,12 @@ const VolunteerForm = ({
     }
   };
 
-  // CAMBIO AQUÍ: Se muestra si eres Admin O si ya estás viendo/editando un registro existente.
-  // (Para usuarios normales creando uno nuevo, se oculta para no confundir).
   const showDictamen =
     (user?.isAdmin || isEditing) &&
     ["En espera por aprobación", "Apto", "Rechazado"].includes(
       currentStatus || "En espera por aprobación",
     );
 
-  // Helper para mostrar errores
   const ErrorMsg = ({ error }) => {
     if (!error) return null;
     return (
@@ -140,22 +146,18 @@ const VolunteerForm = ({
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* PRIMER NOMBRE */}
+          {/* ... (Campos personales: nombre, apellidos, etc. IGUAL QUE ANTES) ... */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Primer Nombre <span className="text-red-500">*</span>
             </label>
             <input
-              {...register("first_name", {
-                required: "El nombre es obligatorio",
-              })}
+              {...register("first_name", { required: "Requerido" })}
               disabled={isReadOnly}
               className={inputClass(errors.first_name)}
             />
             <ErrorMsg error={errors.first_name} />
           </div>
-
-          {/* SEGUNDO NOMBRE (Opcional) */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Segundo Nombre
@@ -166,38 +168,28 @@ const VolunteerForm = ({
               className={inputClass(errors.middle_name)}
             />
           </div>
-
-          {/* APELLIDO PATERNO */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Apellido Paterno <span className="text-red-500">*</span>
             </label>
             <input
-              {...register("last_name_paternal", {
-                required: "El apellido paterno es obligatorio",
-              })}
+              {...register("last_name_paternal", { required: "Requerido" })}
               disabled={isReadOnly}
               className={inputClass(errors.last_name_paternal)}
             />
             <ErrorMsg error={errors.last_name_paternal} />
           </div>
-
-          {/* APELLIDO MATERNO */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Apellido Materno <span className="text-red-500">*</span>
             </label>
             <input
-              {...register("last_name_maternal", {
-                required: "El apellido materno es obligatorio",
-              })}
+              {...register("last_name_maternal", { required: "Requerido" })}
               disabled={isReadOnly}
               className={inputClass(errors.last_name_maternal)}
             />
             <ErrorMsg error={errors.last_name_maternal} />
           </div>
-
-          {/* FECHA NACIMIENTO */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Fecha de nacimiento <span className="text-red-500">*</span>
@@ -205,7 +197,7 @@ const VolunteerForm = ({
             <Controller
               control={control}
               name="birth_date"
-              rules={{ required: "La fecha de nacimiento es obligatoria" }}
+              rules={{ required: "Requerido" }}
               render={({ field }) => (
                 <CustomDatePicker
                   selectedDate={field.value}
@@ -216,14 +208,12 @@ const VolunteerForm = ({
               )}
             />
           </div>
-
-          {/* SEXO */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Sexo <span className="text-red-500">*</span>
             </label>
             <select
-              {...register("sex", { required: "Seleccione una opción" })}
+              {...register("sex", { required: "Requerido" })}
               disabled={isReadOnly}
               className={inputClass(errors.sex)}
             >
@@ -233,36 +223,26 @@ const VolunteerForm = ({
             </select>
             <ErrorMsg error={errors.sex} />
           </div>
-
-          {/* TELÉFONO */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
               Teléfono <span className="text-red-500">*</span>
             </label>
             <input
-              {...register("phone", { required: "El teléfono es obligatorio" })}
+              {...register("phone", { required: "Requerido" })}
               disabled={isReadOnly}
               className={inputClass(errors.phone)}
             />
             <ErrorMsg error={errors.phone} />
           </div>
-
-          {/* CURP */}
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700">
               CURP <span className="text-red-500">*</span>
             </label>
             <input
               {...register("curp", {
-                required: "La CURP es obligatoria",
-                minLength: {
-                  value: 18,
-                  message: "La CURP debe tener 18 caracteres",
-                },
-                maxLength: {
-                  value: 18,
-                  message: "La CURP debe tener 18 caracteres",
-                },
+                required: "Requerido",
+                minLength: { value: 18, message: "18 caracteres" },
+                maxLength: { value: 18, message: "18 caracteres" },
               })}
               disabled={isReadOnly}
               className={`${inputClass(errors.curp)} uppercase`}
@@ -277,7 +257,7 @@ const VolunteerForm = ({
             <h3 className="font-bold text-purple-800 mb-4 flex items-center">
               <ShieldCheck className="mr-2" /> Dictamen Administrativo
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">
                   Estatus Manual
@@ -294,24 +274,59 @@ const VolunteerForm = ({
                   <option value="rejected">Rechazado</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  {manualStatus === "rejected"
-                    ? "Motivo de Rechazo"
-                    : "Observaciones / Motivo"}
-                </label>
-                <input
-                  type="text"
-                  {...register("status_reason")}
-                  disabled={isReadOnly}
-                  className="w-full p-2 border border-purple-300 rounded mt-1 outline-none focus:ring-1 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-500"
-                  placeholder={
-                    manualStatus === "rejected"
-                      ? "Ej: No pasó prueba médica"
-                      : "Opcional"
-                  }
-                />
-              </div>
+
+              {/* SI ES RECHAZADO: MOSTRAR DROPDOWN DE CATEGORÍA */}
+              {manualStatus === "rejected" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Categoría de Rechazo <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    {...register("rejection_category", {
+                      required:
+                        manualStatus === "rejected"
+                          ? "Selecciona una categoría"
+                          : false,
+                    })}
+                    disabled={isReadOnly}
+                    className="w-full p-2 border border-purple-300 rounded mt-1 bg-white outline-none focus:ring-1 focus:ring-purple-500"
+                  >
+                    <option value="">Seleccione...</option>
+                    <option value="IMC">IMC</option>
+                    <option value="Laboratoriales">Laboratoriales</option>
+                    <option value="Incumplimiento">Incumplimiento</option>
+                    <option value="Otro">Otro</option>
+                  </select>
+                  <ErrorMsg error={errors.rejection_category} />
+                </div>
+              )}
+
+              {/* OBSERVACIONES (Siempre visible si es apto o rechazado, obligatorio si es rechazado) */}
+              {(manualStatus === "rejected" || manualStatus === "eligible") && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    {manualStatus === "rejected"
+                      ? "Observaciones del Rechazo"
+                      : "Observaciones (Opcional)"}
+                    {manualStatus === "rejected" && (
+                      <span className="text-red-500">*</span>
+                    )}
+                  </label>
+                  <textarea
+                    {...register("status_reason", {
+                      required:
+                        manualStatus === "rejected"
+                          ? "Escribe las observaciones"
+                          : false,
+                    })}
+                    disabled={isReadOnly}
+                    rows={3}
+                    className="w-full p-2 border border-purple-300 rounded mt-1 outline-none focus:ring-1 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    placeholder="Detalles..."
+                  />
+                  <ErrorMsg error={errors.status_reason} />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -332,7 +347,7 @@ const VolunteerForm = ({
               />
               <p className="text-xs text-blue-600 mt-2">
                 * Al seleccionar un estudio, el voluntario quedará inscrito
-                automáticamente con la fecha de internamiento configurada.
+                automáticamente.
               </p>
             </div>
           </div>

@@ -37,6 +37,8 @@ import {
   User,
   CalendarPlus,
   Info,
+  RotateCcw, // Nuevo ícono para reevaluación
+  UserX, // Nuevo ícono para edad
 } from "lucide-react";
 import Modal from "../components/Modal";
 import SmartTable from "../components/SmartTable";
@@ -44,7 +46,7 @@ import { AuthContext } from "../context/AuthContext";
 import VolunteerForm from "./VolunteerForm";
 import ParticipationManager from "../components/ParticipationManager";
 
-// --- COMPONENTE DE TAGS DE ESTUDIOS ---
+// ... [ResponsiveStudyTags] ... (Mismo código)
 const ResponsiveStudyTags = ({ participations }) => {
   const containerRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(1);
@@ -119,7 +121,7 @@ const ResponsiveStudyTags = ({ participations }) => {
   );
 };
 
-// --- COMPONENTE DE MENÚ DESPLEGABLE DE ACCIONES ---
+// ... [ActionMenu] ... (Mismo código)
 const ActionMenu = ({ row, actions }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef(null);
@@ -192,7 +194,7 @@ const VolunteerList = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
-  // Modal para acciones (Estatus, Quitar, Cambiar, Asignar)
+  // Modal para acciones
   const [actionModal, setActionModal] = useState({
     isOpen: false,
     volunteerId: null,
@@ -205,7 +207,9 @@ const VolunteerList = () => {
   });
   const [actionJustification, setActionJustification] = useState("");
 
-  // NUEVO: Modal de validación de datos faltantes
+  const [rejectionCategory, setRejectionCategory] = useState("");
+  const [statusReason, setStatusReason] = useState("");
+
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState([]);
 
@@ -259,7 +263,7 @@ const VolunteerList = () => {
     return () => clearInterval(intervalId);
   }, [fetchVolunteers]);
 
-  // --- FUNCIÓN DE VALIDACIÓN DE CAMPOS OBLIGATORIOS ---
+  // --- FUNCIÓN DE VALIDACIÓN ---
   const validateVolunteerData = (volunteer) => {
     const requiredFields = [
       { key: "first_name", label: "Nombre" },
@@ -280,7 +284,6 @@ const VolunteerList = () => {
 
   // --- MANEJO DE ACCIONES ---
   const openActionModal = (row, type, payload, title, description) => {
-    // 1. VALIDACIÓN PREVIA (Con Modal Bonito)
     const missingFields = validateVolunteerData(row);
     if (missingFields.length > 0) {
       setValidationErrors(missingFields);
@@ -288,7 +291,6 @@ const VolunteerList = () => {
       return;
     }
 
-    // 2. Si pasa la validación, abre el modal de acción
     setActionModal({
       isOpen: true,
       volunteerId: row.id,
@@ -301,20 +303,41 @@ const VolunteerList = () => {
     });
     setActionJustification("");
     setSelectedNewStudyId("");
+    setRejectionCategory("");
+    setStatusReason("");
   };
 
   const handleActionSubmit = async () => {
     if (!actionJustification.trim()) {
-      alert("La justificación es obligatoria.");
+      alert("La justificación de auditoría es obligatoria.");
       return;
     }
 
     try {
       if (actionModal.type === "status_change") {
-        await api.patch(`volunteers/${actionModal.volunteerId}/`, {
+        const payload = {
           manual_status: actionModal.payload,
           justification: actionJustification,
-        });
+        };
+
+        if (actionModal.payload === "rejected") {
+          if (!rejectionCategory) {
+            alert("Debes seleccionar una categoría de rechazo.");
+            return;
+          }
+          if (!statusReason.trim()) {
+            alert("Debes escribir las observaciones del rechazo.");
+            return;
+          }
+          payload.rejection_category = rejectionCategory;
+          payload.status_reason = statusReason;
+        }
+
+        if (actionModal.payload === "eligible") {
+          if (statusReason.trim()) payload.status_reason = statusReason;
+        }
+
+        await api.patch(`volunteers/${actionModal.volunteerId}/`, payload);
       } else if (actionModal.type === "remove_study") {
         await api.post(
           `volunteers/${actionModal.volunteerId}/remove-current-study/`,
@@ -385,6 +408,7 @@ const VolunteerList = () => {
     return volunteers.find((v) => v.id === showHistoryFor.id) || showHistoryFor;
   }, [volunteers, showHistoryFor]);
 
+  // --- ACTUALIZACIÓN DE CONTEOS ---
   const counts = useMemo(
     () => ({
       todos: volunteers.length,
@@ -399,15 +423,17 @@ const VolunteerList = () => {
       descanso: volunteers.filter(
         (v) => v.raw_status === "En espera (Descanso)",
       ).length,
-      rechazados: volunteers.filter(
-        (v) =>
-          v.raw_status.includes("Rechazado") ||
-          v.raw_status.includes("No elegible"),
-      ).length,
+      reevaluacion: volunteers.filter((v) => v.raw_status === "Reevaluación")
+        .length, // NUEVO
+      edad: volunteers.filter((v) => v.raw_status === "No elegible por edad")
+        .length, // NUEVO
+      rechazados: volunteers.filter((v) => v.raw_status.includes("Rechazado"))
+        .length, // MODIFICADO (Ya no incluye edad)
     }),
     [volunteers],
   );
 
+  // --- FILTRADO POR PESTAÑA ---
   const filteredData = useMemo(() => {
     switch (activeTab) {
       case "aptos":
@@ -424,12 +450,14 @@ const VolunteerList = () => {
         return volunteers.filter(
           (v) => v.raw_status === "En espera (Descanso)",
         );
-      case "rechazados":
+      case "reevaluacion":
+        return volunteers.filter((v) => v.raw_status === "Reevaluación"); // NUEVO
+      case "edad":
         return volunteers.filter(
-          (v) =>
-            v.raw_status.includes("Rechazado") ||
-            v.raw_status.includes("No elegible"),
-        );
+          (v) => v.raw_status === "No elegible por edad",
+        ); // NUEVO
+      case "rechazados":
+        return volunteers.filter((v) => v.raw_status.includes("Rechazado")); // MODIFICADO
       default:
         return volunteers;
     }
@@ -442,6 +470,8 @@ const VolunteerList = () => {
     asignado: "Asignados",
     por_aprobacion: "Por Aprobar",
     descanso: "En Descanso",
+    reevaluacion: "Reevaluación",
+    edad: "Edad",
     rechazados: "Rechazados",
   };
 
@@ -453,12 +483,14 @@ const VolunteerList = () => {
       asignado: "Programados para Ingreso",
       por_aprobacion: "Solicitudes Pendientes",
       descanso: "Periodo de Lavado (Descanso)",
-      rechazados: "Voluntarios No Aptos / Rechazados",
+      reevaluacion: "Requieren Reevaluación Médica",
+      edad: "No Elegibles por Edad (>55)",
+      rechazados: "Voluntarios Rechazados",
     };
     return titles[activeTab] || "Voluntarios";
   };
 
-  // --- Handlers básicos ---
+  // ... [Handlers básicos y Exportación] ... (Igual)
   const handleCreate = () => {
     setSelectedVolunteerId(null);
     setIsViewMode(false);
@@ -482,10 +514,8 @@ const VolunteerList = () => {
     handleCloseModal();
     fetchVolunteers(false);
   };
-
-  // --- Exportación e Importación ---
   const handleDownloadTemplate = async () => {
-    /* ... */
+    /*...*/
   };
   const handleExportData = async (filterType = "todos") => {
     try {
@@ -521,7 +551,6 @@ const VolunteerList = () => {
       alert("Error exportando");
     }
   };
-
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -552,7 +581,7 @@ const VolunteerList = () => {
     return Array.from(options).sort();
   }, [volunteers]);
 
-  // --- COLUMNAS (con el nuevo Menú) ---
+  // --- COLUMNAS ---
   const columns = useMemo(() => {
     const baseCols = [
       {
@@ -645,6 +674,8 @@ const VolunteerList = () => {
           "En espera por aprobación",
           "En espera (Descanso)",
           "Rechazado",
+          "Reevaluación",
+          "No elegible por edad",
         ],
         render: (row) => {
           const s = row.status || "";
@@ -659,8 +690,12 @@ const VolunteerList = () => {
             style = "bg-orange-50 text-orange-700 border-orange-200";
           else if (s === "En espera (Descanso)")
             style = "bg-teal-50 text-teal-700 border-teal-200";
+          else if (s === "Reevaluación")
+            style = "bg-cyan-50 text-cyan-700 border-cyan-200"; // NUEVO COLOR
           else if (s.includes("Rechazado"))
             style = "bg-red-50 text-red-700 border-red-200";
+          else if (s.includes("No elegible"))
+            style = "bg-gray-50 text-gray-500 border-gray-200"; // NUEVO COLOR
           return (
             <span
               className={`px-2 py-1 rounded-full text-[10px] font-bold border ${style} block text-center truncate`}
@@ -689,6 +724,27 @@ const VolunteerList = () => {
           >
             {row.contacted ? <Phone size={18} /> : <PhoneOff size={18} />}
           </button>
+        ),
+      });
+    }
+
+    if (activeTab === "rechazados") {
+      baseCols.push({
+        key: "rejection_info",
+        label: "Motivo Rechazo",
+        width: "250px",
+        render: (row) => (
+          <div className="flex flex-col text-xs">
+            <span className="font-bold text-red-700">
+              {row.rejection_category || "Sin categoría"}
+            </span>
+            <span
+              className="text-gray-600 italic line-clamp-2"
+              title={row.status_reason}
+            >
+              {row.status_reason || "Sin observaciones"}
+            </span>
+          </div>
         ),
       });
     }
@@ -726,7 +782,11 @@ const VolunteerList = () => {
         ];
 
         if (user?.isAdmin) {
-          if (row.raw_status === "En espera por aprobación") {
+          // PARA PENDIENTES Y REEVALUACIÓN
+          if (
+            row.raw_status === "En espera por aprobación" ||
+            row.raw_status === "Reevaluación"
+          ) {
             menuActions.push({
               title: "Validar",
               items: [
@@ -865,6 +925,8 @@ const VolunteerList = () => {
       violet: "border-violet-600 text-violet-700 bg-violet-50",
       orange: "border-orange-500 text-orange-700 bg-orange-50",
       teal: "border-teal-600 text-teal-700 bg-teal-50",
+      cyan: "border-cyan-600 text-cyan-700 bg-cyan-50",
+      gray: "border-gray-600 text-gray-700 bg-gray-50",
       red: "border-red-600 text-red-700 bg-red-50",
     };
     return (
@@ -892,7 +954,6 @@ const VolunteerList = () => {
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in pb-10">
-      {/* HEADER Y TABS (Igual que antes) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-gray-50/30 gap-4">
           <div>
@@ -965,6 +1026,21 @@ const VolunteerList = () => {
             icon={Hourglass}
             count={counts.descanso}
             color="teal"
+          />
+          {/* NUEVAS PESTAÑAS */}
+          <FilterTab
+            id="reevaluacion"
+            label="Reevaluación"
+            icon={RotateCcw}
+            count={counts.reevaluacion}
+            color="cyan"
+          />
+          <FilterTab
+            id="edad"
+            label="Edad"
+            icon={UserX}
+            count={counts.edad}
+            color="gray"
           />
           <FilterTab
             id="rechazados"
@@ -1138,10 +1214,59 @@ const VolunteerList = () => {
           </div>
 
           <div
-            className={`p-4 rounded-lg border ${actionModal.type === "remove_study" ? "bg-red-50 border-red-200 text-red-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}
+            className={`p-4 rounded-lg border ${actionModal.payload === "rejected" ? "bg-red-50 border-red-200 text-red-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}
           >
             <p className="text-sm font-medium">{actionModal.description}</p>
           </div>
+
+          {/* CAMPOS ESPECÍFICOS PARA RECHAZO */}
+          {actionModal.payload === "rejected" && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">
+                  Categoría de Rechazo <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-500 outline-none text-sm bg-white"
+                  value={rejectionCategory}
+                  onChange={(e) => setRejectionCategory(e.target.value)}
+                >
+                  <option value="">Seleccione...</option>
+                  <option value="IMC">IMC</option>
+                  <option value="Laboratoriales">Laboratoriales</option>
+                  <option value="Incumplimiento">Incumplimiento</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">
+                  Observaciones del Rechazo{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-500 outline-none text-sm h-20"
+                  placeholder="Detalles específicos..."
+                  value={statusReason}
+                  onChange={(e) => setStatusReason(e.target.value)}
+                ></textarea>
+              </div>
+            </div>
+          )}
+
+          {/* CAMPOS ESPECÍFICOS PARA APTO (OPCIONAL) */}
+          {actionModal.payload === "eligible" && (
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">
+                Observaciones (Opcional)
+              </label>
+              <textarea
+                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm h-20"
+                placeholder="Alguna nota sobre la aprobación..."
+                value={statusReason}
+                onChange={(e) => setStatusReason(e.target.value)}
+              ></textarea>
+            </div>
+          )}
 
           {/* SELECTOR PARA CAMBIAR O ASIGNAR ESTUDIO */}
           {(actionModal.type === "change_study" ||
@@ -1167,11 +1292,14 @@ const VolunteerList = () => {
 
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
-              Justificación (Obligatoria para auditoría)
+              Justificación de Auditoría <span className="text-red-500">*</span>
             </label>
+            <p className="text-xs text-gray-400 mb-1">
+              Motivo administrativo por el que realizas esta acción.
+            </p>
             <textarea
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-24 text-sm"
-              placeholder="Escribe el motivo..."
+              placeholder="Ej: Revisión médica completada..."
               value={actionJustification}
               onChange={(e) => setActionJustification(e.target.value)}
             ></textarea>
@@ -1185,7 +1313,7 @@ const VolunteerList = () => {
             </button>
             <button
               onClick={handleActionSubmit}
-              className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-md ${actionModal.type === "remove_study" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
+              className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-md ${actionModal.payload === "rejected" || actionModal.type === "remove_study" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
             >
               Confirmar
             </button>
