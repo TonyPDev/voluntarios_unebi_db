@@ -28,7 +28,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     search_fields = ['first_name', 'last_name_paternal', 'last_name_maternal', 'code', 'curp']
     ordering_fields = ['created_at', 'birth_date', 'code']
 
-    # --- MÉTODO AUXILIAR PARA CALCULAR ESTATUS (Debe coincidir con Serializer) ---
+    # --- MÉTODO AUXILIAR PARA CALCULAR ESTATUS ---
     def calculate_status(self, volunteer):
         today = date.today()
         
@@ -40,7 +40,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             else:
                 return "Estudio asignado"
         
-        # 2. Edad
+        # 2. Edad > 55
         if volunteer.age and volunteer.age > 55:
             return "No elegible por edad"
 
@@ -51,7 +51,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             if today < three_months_later:
                 return "En espera (Descanso)"
             elif volunteer.manual_status != 'rejected':
-                return "Reevaluación" # MODIFICADO
+                return "Apto"
         
         # 4. Fallback Manual
         status_map = {
@@ -59,9 +59,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             'eligible': 'Apto',
             'rejected': 'Rechazado',
             'in_study': 'En estudio',
-            'study_assigned': 'Estudio asignado',
-            'reevaluation': 'Reevaluación',
-            'age_mismatch': 'No elegible por edad'
+            'study_assigned': 'Estudio asignado'
         }
         return status_map.get(volunteer.manual_status, 'En espera por aprobación')
 
@@ -100,6 +98,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    # --- ACCIÓN: DESASIGNAR ESTUDIO ---
     @action(detail=True, methods=['post'], url_path='remove-current-study')
     def remove_current_study(self, request, pk=None):
         volunteer = self.get_object()
@@ -118,8 +117,11 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             return Response({"detail": "No se encontró ningún estudio para eliminar."}, status=status.HTTP_400_BAD_REQUEST)
 
         study_name = last_participation.study.name
+        
+        # Eliminar la participación
         last_participation.delete()
         
+        # Actualizar estatus a 'Apto'
         previous_status = volunteer.manual_status
         volunteer.manual_status = 'eligible'
         volunteer.save()
@@ -143,6 +145,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             "new_status": "Apto"
         }, status=status.HTTP_200_OK)
 
+    # --- NUEVA ACCIÓN: CAMBIAR DE ESTUDIO ---
     @action(detail=True, methods=['post'], url_path='change-current-study')
     def change_current_study(self, request, pk=None):
         volunteer = self.get_object()
@@ -157,6 +160,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         if not justification or not new_study_id:
             return Response({"detail": "La justificación y el nuevo estudio son requeridos."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Buscar la participación actual
         current_participation = volunteer.participations.order_by('-id').first()
         
         if not current_participation:
@@ -169,9 +173,11 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
         old_study_name = current_participation.study.name
         
+        # Actualizar la participación existente
         current_participation.study = new_study
         current_participation.save()
 
+        # Auditoría
         AuditLog.objects.create(
             user=user,
             action='UPDATE',
@@ -200,6 +206,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         else:
             return Response({"error": "El archivo de plantilla no se encuentra en el servidor."}, status=status.HTTP_404_NOT_FOUND)
 
+    # --- EXPORTAR DATOS ---
     @action(detail=False, methods=['get'], url_path='export')
     def export_data(self, request):
         target_tab = request.query_params.get('tab', 'todos')
@@ -233,14 +240,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                     include_row = False
                 elif target_tab == 'descanso' and real_status != "En espera (Descanso)":
                     include_row = False
-                # NUEVA PESTAÑA REEVALUACION
-                elif target_tab == 'reevaluacion' and real_status != "Reevaluación":
-                    include_row = False
-                # NUEVA PESTAÑA EDAD
-                elif target_tab == 'edad' and real_status != "No elegible por edad":
-                    include_row = False
-                # ACTUALIZADA PESTAÑA RECHAZADOS (Solo manuales)
-                elif target_tab == 'rechazados' and not ("Rechazado" in real_status):
+                elif target_tab == 'rechazados' and not ("Rechazado" in real_status or "No elegible" in real_status):
                     include_row = False
 
             if include_row:
