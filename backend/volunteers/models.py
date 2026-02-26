@@ -49,7 +49,19 @@ class Volunteer(models.Model):
     
     status_reason = models.TextField(blank=True, null=True, verbose_name="Observaciones / Motivo")
     
-    contacted = models.BooleanField(default=False, verbose_name="Contactado")
+    # Nuevos estados de contacto solicitados
+    CONTACT_STATUS_CHOICES = [
+        ('not_contacted', 'No contactado'),       # Gris
+        ('contacted_yes', 'Contactado (Sí)'),     # Verde
+        ('contacted_no_response', 'No respondió'),# Amarillo
+        ('contacted_rejected', 'Rechazó'),        # Rojo
+    ]
+    contacted = models.CharField(
+        max_length=30, 
+        choices=CONTACT_STATUS_CHOICES, 
+        default='not_contacted', 
+        verbose_name="Estatus de Contacto"
+    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -70,6 +70,13 @@ const VolunteerForm = ({
     setServerError("");
     const payload = { ...data };
 
+    // --- CORRECCIÓN DEL ERROR "false is not a valid choice" ---
+    // Si el registro tiene un valor antiguo ("false" o false) en 'contacted',
+    // lo convertimos a 'not_contacted' antes de enviarlo para que pase la validación.
+    if (payload.contacted === "false" || payload.contacted === false) {
+      payload.contacted = "not_contacted";
+    }
+
     if (!payload.initial_study_id) {
       delete payload.initial_study_id;
       delete payload.initial_admission_date;

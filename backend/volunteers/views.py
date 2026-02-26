@@ -51,7 +51,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             if today < three_months_later:
                 return "En espera (Descanso)"
             elif volunteer.manual_status != 'rejected':
-                return "Reevaluación" # MODIFICADO
+                return "Reevaluación"
         
         # 4. Fallback Manual
         status_map = {
@@ -233,13 +233,10 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                     include_row = False
                 elif target_tab == 'descanso' and real_status != "En espera (Descanso)":
                     include_row = False
-                # NUEVA PESTAÑA REEVALUACION
                 elif target_tab == 'reevaluacion' and real_status != "Reevaluación":
                     include_row = False
-                # NUEVA PESTAÑA EDAD
                 elif target_tab == 'edad' and real_status != "No elegible por edad":
                     include_row = False
-                # ACTUALIZADA PESTAÑA RECHAZADOS (Solo manuales)
                 elif target_tab == 'rechazados' and not ("Rechazado" in real_status):
                     include_row = False
 
@@ -247,6 +244,14 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 fecha_nac = v.birth_date.strftime('%d/%m/%Y') if v.birth_date else ""
                 estudios = ", ".join([p.study.name for p in v.participations.all()])
                 
+                # CORRECCIÓN: Manejo robusto del display de contactado
+                contacted_val = v.contacted
+                # Si por error de migración es un booleano o string 'false'
+                if str(contacted_val).lower() == 'false' or contacted_val is False:
+                    contacted_display = "No contactado"
+                else:
+                    contacted_display = v.get_contacted_display()
+
                 row = {
                     'Codigo': v.code,
                     'Nombre': v.first_name,
@@ -259,7 +264,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                     'Telefono': v.phone,
                     'Estudios': estudios,
                     'Estatus Actual': real_status,
-                    'Contactado': 'Sí' if v.contacted else 'No'
+                    'Contactado': contacted_display
                 }
                 data.append(row)
 

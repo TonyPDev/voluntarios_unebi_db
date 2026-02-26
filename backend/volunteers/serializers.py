@@ -105,16 +105,23 @@ class VolunteerSerializer(serializers.ModelSerializer):
         justification = validated_data.pop('justification', None)
         user = self.context['request'].user
 
-        if not justification:
-            raise serializers.ValidationError({"justification": "La justificación es obligatoria."})
-
+        # Obtenemos los cambios
         changes = {}
         for field, value in validated_data.items():
+            # EXCLUSIÓN SOLICITADA: Si el campo es 'contacted', no lo agregamos a changes
+            if field == 'contacted':
+                continue
+                
             old_value = getattr(instance, field)
             if old_value != value:
                 changes[field] = {'from': str(old_value), 'to': str(value)}
 
+        # Solo creamos el log si hay cambios en otros campos que no sean 'contacted'
         if changes:
+            if not justification:
+                # Si hay cambios auditables, exigimos la justificación
+                raise serializers.ValidationError({"justification": "La justificación es obligatoria para cambios auditables."})
+
             AuditLog.objects.create(
                 user=user,
                 action='UPDATE',
