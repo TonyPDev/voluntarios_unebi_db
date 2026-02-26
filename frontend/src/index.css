@@ -5,3 +5,13 @@
 body {
   @apply bg-gray-50 text-gray-900;
 }
+
+/* Aplica un zoom del 80% en pantallas con resoluciones típicas de laptops 
+   (entre 1024px y 1600px de ancho). 
+   Esto cubre la mayoría de pantallas de 13" y 14".
+*/
+@media screen and (min-width: 1024px) and (max-width: 1600px) {
+  body {
+    zoom: 80%;
+  }
+}
