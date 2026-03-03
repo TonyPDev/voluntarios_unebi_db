@@ -1,8 +1,7 @@
 import axios from "axios";
-import { jwtDecode } from "jwt-decode";
 
-// Asegúrate de que esta URL sea la misma que configuraste en el paso anterior (tu IP o localhost)
-const baseURL = "http://192.168.20.146:8000/api/";
+// Asegúrate de que esta URL sea la misma que configuraste (tu IP o localhost)
+const baseURL = "http://192.168.20.141:8000/api/";
 
 const api = axios.create({
   baseURL: baseURL,
@@ -12,56 +11,89 @@ const api = axios.create({
   },
 });
 
+// 1. INTERCEPTOR DE PETICIÓN (Request)
+// Su única función es adjuntar el token actual a cada petición que sale.
 api.interceptors.request.use(
-  async (config) => {
-    let token = localStorage.getItem("token");
-
+  (config) => {
+    const token = localStorage.getItem("token");
     if (token) {
-      const decoded = jwtDecode(token);
-      const isExpired = decoded.exp < Date.now() / 1000;
-
-      if (isExpired) {
-        const refreshToken = localStorage.getItem("refresh");
-
-        if (!refreshToken) {
-          // Si no hay refresh token, sí cerramos sesión
-          localStorage.clear();
-          window.location.href = "/login";
-          return Promise.reject("No hay refresh token disponible");
-        }
-
-        try {
-          console.log("Token expirado. Intentando renovar...");
-
-          // Usamos una instancia limpia de axios para evitar bucles infinitos
-          // Nota: Concatenamos 'token/refresh/' a la baseURL
-          const response = await axios.post(`${baseURL}token/refresh/`, {
-            refresh: refreshToken,
-          });
-
-          // 1. Guardamos el nuevo token
-          const newAccessToken = response.data.access;
-          localStorage.setItem("token", newAccessToken);
-
-          // 2. Actualizamos la variable local para usarla en esta misma petición
-          token = newAccessToken;
-
-          console.log("Token renovado con éxito.");
-        } catch (error) {
-          // Si el refresh token también venció (pasaron 24h) o es inválido
-          console.error("No se pudo renovar el token:", error);
-          localStorage.clear();
-          window.location.href = "/login";
-          return Promise.reject("Sesión expirada totalmente");
-        }
-      }
-
-      // Asignamos el token (ya sea el viejo válido o el nuevo recién renovado)
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  },
+);
+
+// 2. INTERCEPTOR DE RESPUESTA (Response)
+// Escucha lo que responde el servidor. Si el servidor dice "401 Expirado", renovamos.
+api.interceptors.response.use(
+  (response) => {
+    // Si la petición fue exitosa, simplemente la devolvemos
+    return response;
+  },
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Verificamos si el error es 401 (No autorizado)
+    // y evitamos bucles infinitos asegurándonos de que no sea la ruta de login/refresh original
+    if (
+      error.response &&
+      error.response.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.url.includes("token/")
+    ) {
+      originalRequest._retry = true; // Marcamos esta petición para no reintentarla eternamente
+
+      const refreshToken = localStorage.getItem("refresh");
+
+      // Si no hay refresh token, no hay nada que hacer, cerramos sesión
+      if (!refreshToken) {
+        localStorage.clear();
+        window.location.href = "/login";
+        return Promise.reject(error);
+      }
+
+      try {
+        console.log(
+          "El servidor indicó token expirado. Renovando silenciosamente...",
+        );
+
+        // Hacemos una petición limpia (con axios directo) para obtener el nuevo token
+        const response = await axios.post(`${baseURL}token/refresh/`, {
+          refresh: refreshToken,
+        });
+
+        // Guardamos el nuevo token de acceso
+        const newAccessToken = response.data.access;
+        localStorage.setItem("token", newAccessToken);
+
+        // Algunos backends rotan el refresh token, si manda uno nuevo, lo actualizamos
+        if (response.data.refresh) {
+          localStorage.setItem("refresh", response.data.refresh);
+        }
+
+        console.log(
+          "Token renovado con éxito. Reintentando petición original...",
+        );
+
+        // Actualizamos la cabecera de la petición original que falló y la volvemos a disparar
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        // Si la petición de refresh también da error (ej. pasaron más de 24 horas)
+        console.error(
+          "El Refresh Token también es inválido o expiró. Cerrando sesión.",
+          refreshError,
+        );
+        localStorage.clear();
+        window.location.href = "/login";
+        return Promise.reject(refreshError);
+      }
+    }
+
+    // Si el error no fue 401, lo dejamos pasar para que el componente lo maneje
     return Promise.reject(error);
   },
 );
