@@ -1,10 +1,51 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useForm, Controller } from "react-hook-form";
 import api from "../api/axios";
 import SmartTable from "../components/SmartTable";
 import Modal from "../components/Modal";
 import CustomDatePicker from "../components/CustomDatePicker";
-import { Shield, BookOpen, Users, Plus, Edit } from "lucide-react";
+import { Shield, BookOpen, Users, Plus, Edit, Minus } from "lucide-react";
+
+// Componente auxiliar para manejar listas dinámicas (Moléculas y Dosis)
+const ArrayInput = ({ label, addLabel, items, setItems, placeholder }) => (
+  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mt-2">
+    <label className="block text-sm font-bold text-gray-700 mb-2">
+      {label}
+    </label>
+    <div className="space-y-2">
+      {items.map((item, idx) => (
+        <div key={idx} className="flex items-center gap-2 animate-fade-in">
+          <input
+            type="text"
+            value={item}
+            onChange={(e) => {
+              const newItems = [...items];
+              newItems[idx] = e.target.value;
+              setItems(newItems);
+            }}
+            placeholder={placeholder}
+            className="w-full p-2 text-sm border rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+          />
+          <button
+            type="button"
+            onClick={() => setItems(items.filter((_, i) => i !== idx))}
+            className="bg-red-50 text-red-600 p-2 rounded hover:bg-red-100 transition-colors"
+            title="Quitar"
+          >
+            <Minus size={16} />
+          </button>
+        </div>
+      ))}
+    </div>
+    <button
+      type="button"
+      onClick={() => setItems([...items, ""])}
+      className="mt-3 text-sm text-blue-600 font-bold flex items-center hover:text-blue-800 transition-colors"
+    >
+      <Plus size={16} className="mr-1" /> {addLabel}
+    </button>
+  </div>
+);
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("studies");
@@ -17,8 +58,10 @@ const AdminDashboard = () => {
   const [isStudyModalOpen, setIsStudyModalOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
 
-  // Estado de Edición
+  // Estado de Edición de Estudios y Listas Dinámicas
   const [editingStudy, setEditingStudy] = useState(null);
+  const [molecules, setMolecules] = useState([]);
+  const [doses, setDoses] = useState([]);
 
   // Formularios
   const {
@@ -41,7 +84,15 @@ const AdminDashboard = () => {
     try {
       if (activeTab === "studies") {
         const res = await api.get("studies/");
-        setStudies(res.data);
+        // Procesamos datos para los filtros de la tabla
+        const processedStudies = res.data.map((s) => ({
+          ...s,
+          is_active_label: s.is_active ? "Vigente" : "Finalizado",
+          sponsor_label: s.sponsor || "Sin Patrocinador",
+          molecules_display: (s.molecules || []).join(", "),
+          doses_display: (s.doses || []).join(", "),
+        }));
+        setStudies(processedStudies);
       } else if (activeTab === "users") {
         const res = await api.get("admin/users/");
         setUsers(res.data);
@@ -76,19 +127,31 @@ const AdminDashboard = () => {
     loadData();
   }, [activeTab]);
 
+  // Extraer opciones únicas de Patrocinadores para el filtro
+  const sponsorOptions = useMemo(() => {
+    const opts = new Set(studies.map((s) => s.sponsor_label));
+    return Array.from(opts).sort();
+  }, [studies]);
+
   // --- Lógica de Estudios ---
 
   const openCreateStudy = () => {
     setEditingStudy(null);
+    setMolecules([]);
+    setDoses([]);
     resetStudy({
       is_active: true, // Por defecto activado
+      sponsor: "",
     });
     setIsStudyModalOpen(true);
   };
 
   const openEditStudy = (study) => {
     setEditingStudy(study);
+    setMolecules(study.molecules || []);
+    setDoses(study.doses || []);
     setStudyValue("name", study.name);
+    setStudyValue("sponsor", study.sponsor || "");
     setStudyValue("description", study.description);
     setStudyValue("admission_date", study.admission_date);
     setStudyValue("payment_date", study.payment_date);
@@ -97,7 +160,13 @@ const AdminDashboard = () => {
   };
 
   const onSaveStudy = async (data) => {
-    const payload = { ...data };
+    const payload = {
+      ...data,
+      // Limpiamos strings vacíos que el usuario haya dejado
+      molecules: molecules.filter((m) => m.trim() !== ""),
+      doses: doses.filter((d) => d.trim() !== ""),
+    };
+
     // Limpieza de fechas
     if (!payload.payment_date) payload.payment_date = null;
     if (!payload.admission_date) payload.admission_date = null;
@@ -156,12 +225,16 @@ const AdminDashboard = () => {
     const fieldMap = {
       // Estudios
       name: "Nombre",
+      sponsor: "Patrocinador",
+      molecules: "Moléculas",
+      doses: "Dosis",
       description: "Descripción",
       admission_date: "F. Internamiento",
       payment_date: "F. Pago",
       is_active: "Vigente",
 
       // Voluntarios
+      code: "Código",
       first_name: "Primer Nombre",
       middle_name: "Segundo Nombre",
       last_name_paternal: "Apellido Paterno",
@@ -172,13 +245,36 @@ const AdminDashboard = () => {
       curp: "CURP",
       manual_status: "Estatus Administrativo",
       status_reason: "Motivo del Estatus",
+      rejection_category: "Categoría de Rechazo",
+      contacted: "Contactado",
       initial_study_id: "Estudio Inicial",
       justification: "Justificación",
+
+      // Usuarios
+      username: "Usuario",
+      email: "Correo Electrónico",
+      is_staff: "Es Administrador",
     };
 
     // 2. Función auxiliar para traducir Valores específicos
     const formatValue = (key, value) => {
       if (value === null || value === undefined || value === "") return "Vacío";
+
+      // Manejo de Arrays (Moléculas y Dosis)
+      if (Array.isArray(value)) {
+        return value.length > 0 ? value.join(", ") : "Ninguno";
+      }
+      // Stringificado por si es un JSON en string
+      if (
+        typeof value === "string" &&
+        value.startsWith("[") &&
+        value.endsWith("]")
+      ) {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed.join(", ");
+        } catch (e) {}
+      }
 
       // Traducir Estatus Administrativo
       if (key === "manual_status") {
@@ -196,8 +292,14 @@ const AdminDashboard = () => {
       }
 
       // Traducir Booleanos (True/False -> Sí/No)
-      if (key === "is_active" || typeof value === "boolean") {
-        return value ? "Sí" : "No";
+      if (
+        key === "is_active" ||
+        key === "is_staff" ||
+        typeof value === "boolean" ||
+        value === "True" ||
+        value === "False"
+      ) {
+        return value === true || value === "True" ? "Sí" : "No";
       }
 
       return String(value);
@@ -228,7 +330,7 @@ const AdminDashboard = () => {
           return (
             <div key={idx} className="text-xs">
               <span className="font-bold text-gray-700">{fieldName}:</span>{" "}
-              <span>{String(val)}</span>
+              <span>{formatValue(key, val)}</span>
             </div>
           );
         })}
@@ -237,27 +339,78 @@ const AdminDashboard = () => {
   };
 
   const studyCols = [
-    { key: "name", label: "Nombre" },
+    { key: "name", label: "Nombre", sortable: true },
+    {
+      key: "sponsor_label",
+      label: "Patrocinador",
+      sortable: true,
+      filterKey: "sponsor_label",
+      filterOptions: sponsorOptions,
+    },
+    {
+      key: "molecules_display",
+      label: "Moléculas",
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.molecules && r.molecules.length > 0 ? (
+            r.molecules.map((m, i) => (
+              <span
+                key={i}
+                className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200"
+              >
+                {m}
+              </span>
+            ))
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "doses_display",
+      label: "Dosis",
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.doses && r.doses.length > 0 ? (
+            r.doses.map((d, i) => (
+              <span
+                key={i}
+                className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200"
+              >
+                {d}
+              </span>
+            ))
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      ),
+    },
     {
       key: "admission_date",
       label: "F. Internamiento",
+      sortable: true,
       render: (r) => r.admission_date || "-",
     },
     {
       key: "payment_date",
       label: "F. Pago",
+      sortable: true,
       render: (r) => r.payment_date || "-",
     },
     {
-      key: "is_active",
+      key: "is_active_label",
       label: "Estado",
+      filterKey: "is_active_label",
+      filterOptions: ["Vigente", "Finalizado"],
       render: (r) =>
         r.is_active ? (
-          <span className="text-green-600 font-bold text-xs bg-green-100 px-2 py-1 rounded">
+          <span className="text-green-600 font-bold text-[10px] bg-green-100 px-2 py-1 rounded">
             Vigente
           </span>
         ) : (
-          <span className="text-gray-500 font-bold text-xs bg-gray-100 px-2 py-1 rounded">
+          <span className="text-gray-500 font-bold text-[10px] bg-gray-100 px-2 py-1 rounded">
             Finalizado
           </span>
         ),
@@ -277,9 +430,9 @@ const AdminDashboard = () => {
   ];
 
   const userCols = [
-    { key: "username", label: "Usuario" },
-    { key: "first_name", label: "Nombre" },
-    { key: "email", label: "Email" },
+    { key: "username", label: "Usuario", sortable: true },
+    { key: "first_name", label: "Nombre", sortable: true },
+    { key: "email", label: "Email", sortable: true },
     {
       key: "is_staff",
       label: "Rol",
@@ -288,8 +441,13 @@ const AdminDashboard = () => {
   ];
 
   const logCols = [
-    { key: "date_display", label: "Fecha" },
-    { key: "user_name", label: "Usuario" },
+    {
+      key: "date_display",
+      label: "Fecha",
+      sortable: true,
+      customSort: (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
+    },
+    { key: "user_name", label: "Usuario", sortable: true },
     {
       key: "action_display",
       label: "Acción",
@@ -306,7 +464,12 @@ const AdminDashboard = () => {
         </span>
       ),
     },
-    { key: "model_display", label: "Módulo", defaultHidden: true },
+    {
+      key: "model_display",
+      label: "Módulo",
+      defaultHidden: true,
+      sortable: true,
+    },
     {
       key: "justification",
       label: "Justificación",
@@ -392,86 +555,120 @@ const AdminDashboard = () => {
         onClose={() => setIsStudyModalOpen(false)}
         title={editingStudy ? "Editar Estudio" : "Crear Estudio"}
       >
-        <form onSubmit={handleStudySubmit(onSaveStudy)} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium">Nombre</label>
-            <input
-              {...registerStudy("name", { required: true })}
-              className="w-full p-2 border rounded"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium">Descripción</label>
-            <textarea
-              {...registerStudy("description")}
-              className="w-full p-2 border rounded"
-              rows="2"
-            ></textarea>
-          </div>
+        <div className="max-h-[80vh] overflow-y-auto custom-scrollbar p-1">
+          <form onSubmit={handleStudySubmit(onSaveStudy)} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium">
+                  Nombre del Estudio
+                </label>
+                <input
+                  {...registerStudy("name", { required: true })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium">
+                  Patrocinador
+                </label>
+                <input
+                  {...registerStudy("sponsor")}
+                  placeholder="Ej. Pfizer, Roche..."
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+            </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Controller
-                control={controlStudy}
-                name="admission_date"
-                render={({ field }) => (
-                  <CustomDatePicker
-                    label="F. Internamiento"
-                    selectedDate={field.value}
-                    onChange={field.onChange}
-                  />
-                )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ArrayInput
+                label="Moléculas"
+                addLabel="Añadir Molécula"
+                items={molecules}
+                setItems={setMolecules}
+                placeholder="Ej. Paracetamol"
+              />
+              <ArrayInput
+                label="Dosis"
+                addLabel="Añadir Dosis"
+                items={doses}
+                setItems={setDoses}
+                placeholder="Ej. 500 mg"
               />
             </div>
+
             <div>
-              <Controller
-                control={controlStudy}
-                name="payment_date"
-                render={({ field }) => (
-                  <CustomDatePicker
-                    label="F. Pago"
-                    selectedDate={field.value}
-                    onChange={field.onChange}
-                  />
-                )}
-              />
+              <label className="block text-sm font-medium">Descripción</label>
+              <textarea
+                {...registerStudy("description")}
+                className="w-full p-2 border rounded"
+                rows="2"
+              ></textarea>
             </div>
-          </div>
 
-          <div className="flex items-center bg-blue-50 p-3 rounded-lg border border-blue-200 mt-2 hover:bg-blue-100 transition-colors">
-            <input
-              type="checkbox"
-              id="is_active_check"
-              {...registerStudy("is_active")}
-              className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-3 cursor-pointer"
-            />
-            <label
-              htmlFor="is_active_check"
-              className="text-sm font-bold text-blue-800 cursor-pointer select-none"
-            >
-              Estudio Vigente
-            </label>
-          </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Controller
+                  control={controlStudy}
+                  name="admission_date"
+                  render={({ field }) => (
+                    <CustomDatePicker
+                      label="F. Internamiento"
+                      selectedDate={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
+                />
+              </div>
+              <div>
+                <Controller
+                  control={controlStudy}
+                  name="payment_date"
+                  render={({ field }) => (
+                    <CustomDatePicker
+                      label="F. Pago"
+                      selectedDate={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
+                />
+              </div>
+            </div>
 
-          {editingStudy && (
-            <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
-              <label className="block text-sm font-bold text-yellow-800 mb-1">
-                Justificación del Cambio (Auditable)
-              </label>
+            <div className="flex items-center bg-blue-50 p-3 rounded-lg border border-blue-200 mt-2 hover:bg-blue-100 transition-colors">
               <input
-                {...registerStudy("justification", { required: true })}
-                className="w-full p-2 border border-yellow-300 rounded"
-                placeholder="Motivo..."
+                type="checkbox"
+                id="is_active_check"
+                {...registerStudy("is_active")}
+                className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-3 cursor-pointer"
               />
+              <label
+                htmlFor="is_active_check"
+                className="text-sm font-bold text-blue-800 cursor-pointer select-none"
+              >
+                Estudio Vigente
+              </label>
             </div>
-          )}
-          <button
-            type="submit"
-            className="w-full bg-primary text-white py-2 rounded font-bold"
-          >
-            Guardar
-          </button>
-        </form>
+
+            {editingStudy && (
+              <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+                <label className="block text-sm font-bold text-yellow-800 mb-1">
+                  Justificación del Cambio (Auditable)
+                </label>
+                <input
+                  {...registerStudy("justification", { required: true })}
+                  className="w-full p-2 border border-yellow-300 rounded"
+                  placeholder="Motivo..."
+                />
+              </div>
+            )}
+            <button
+              type="submit"
+              className="w-full bg-primary text-white py-2 rounded font-bold mt-4 hover:bg-blue-800 transition-colors"
+            >
+              Guardar
+            </button>
+          </form>
+        </div>
       </Modal>
 
       {/* Modal Usuarios */}
@@ -541,7 +738,7 @@ const AdminDashboard = () => {
           </div>
           <button
             type="submit"
-            className="w-full bg-primary text-white py-2 rounded font-bold"
+            className="w-full bg-primary text-white py-2 rounded font-bold hover:bg-blue-800 transition-colors"
           >
             Crear
           </button>

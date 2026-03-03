@@ -1,8 +1,11 @@
 from django.db import models
-from datetime import date # Importante
+from datetime import date
 
 class Study(models.Model):
     name = models.CharField(max_length=200, unique=True, verbose_name="Nombre del Estudio")
+    sponsor = models.CharField(max_length=200, blank=True, null=True, verbose_name="Patrocinador")
+    molecules = models.JSONField(default=list, blank=True, null=True, verbose_name="Moléculas")
+    doses = models.JSONField(default=list, blank=True, null=True, verbose_name="Dosis")
     description = models.TextField(blank=True, verbose_name="Descripción")
     
     admission_date = models.DateField(null=True, blank=True, verbose_name="Fecha de Internamiento")
