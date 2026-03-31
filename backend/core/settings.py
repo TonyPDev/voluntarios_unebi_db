@@ -29,7 +29,7 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.20.141']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.20.91']
 
 
 # Application definition
@@ -81,8 +81,11 @@ SIMPLE_JWT = {
 # Configuración CORS (Para permitir conexión con React)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://192.168.20.141:5173", 
+    "http://192.168.20.91:5173", 
 ]
+
+CSRF_TRUSTED_ORIGINS = ['http://192.168.20.91']
+
 
 ROOT_URLCONF = 'core.urls'
 
@@ -154,7 +157,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

@@ -2,7 +2,7 @@ from django.db import models
 from datetime import date
 
 class Study(models.Model):
-    name = models.CharField(max_length=200, unique=True, verbose_name="Nombre del Estudio")
+    name = models.CharField(max_length=200, unique=True, verbose_name="Código del Estudio")
     sponsor = models.CharField(max_length=200, blank=True, null=True, verbose_name="Patrocinador")
     molecules = models.JSONField(default=list, blank=True, null=True, verbose_name="Moléculas")
     doses = models.JSONField(default=list, blank=True, null=True, verbose_name="Dosis")

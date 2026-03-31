@@ -13,7 +13,7 @@ admin_router.register(r'users', UserViewSet)
 admin_router.register(r'logs', AuditLogViewSet)
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('sistema-admin/', admin.site.urls),
     
     # Autenticación
     path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
