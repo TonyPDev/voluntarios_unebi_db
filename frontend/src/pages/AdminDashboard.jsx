@@ -223,8 +223,8 @@ const AdminDashboard = () => {
 
     // 1. Diccionario Completo de Campos (Traducción de Keys)
     const fieldMap = {
-      // Estudios
-      name: "Nombre",
+      // Estudios (Actualizado a Código)
+      name: "Código del Estudio",
       sponsor: "Patrocinador",
       molecules: "Moléculas",
       doses: "Dosis",
@@ -339,7 +339,7 @@ const AdminDashboard = () => {
   };
 
   const studyCols = [
-    { key: "name", label: "Nombre", sortable: true },
+    { key: "name", label: "Código", sortable: true }, // Etiqueta actualizada a "Código"
     {
       key: "sponsor_label",
       label: "Patrocinador",
@@ -431,7 +431,26 @@ const AdminDashboard = () => {
 
   const userCols = [
     { key: "username", label: "Usuario", sortable: true },
-    { key: "first_name", label: "Nombre", sortable: true },
+    {
+      key: "full_name",
+      label: "Nombre Completo",
+      sortable: true,
+      customSort: (a, b) => {
+        const nameA = `${a.first_name || ""} ${a.last_name || ""}`
+          .trim()
+          .toLowerCase();
+        const nameB = `${b.first_name || ""} ${b.last_name || ""}`
+          .trim()
+          .toLowerCase();
+        return nameA.localeCompare(nameB);
+      },
+      render: (r) => {
+        const fullName = `${r.first_name || ""} ${r.last_name || ""}`.trim();
+        return (
+          fullName || <span className="text-gray-400 italic">Sin nombre</span>
+        );
+      },
+    },
     { key: "email", label: "Email", sortable: true },
     {
       key: "is_staff",
@@ -560,7 +579,7 @@ const AdminDashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium">
-                  Nombre del Estudio
+                  Código del Estudio
                 </label>
                 <input
                   {...registerStudy("name", { required: true })}
