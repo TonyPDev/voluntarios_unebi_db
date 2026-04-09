@@ -288,24 +288,34 @@ class ImportVolunteersView(APIView):
         if 'file' not in request.data:
             return Response({"error": "No se proporcionó ningún archivo."}, status=status.HTTP_400_BAD_REQUEST)
         file = request.data['file']
+        
         try:
             try:
                 df = pd.read_excel(file)
             except Exception:
                 return Response({"error": "El archivo no es un Excel válido (.xlsx)."}, status=status.HTTP_400_BAD_REQUEST)
 
-            df = df.replace({np.nan: None})
+            # 1. SOLUCIÓN DEFINITIVA A NAN Y NAT: 
+            # Convierte estrictamente cualquier valor nulo de Pandas a un None nativo de Python
+            df = df.where(pd.notnull(df), None)
+            
+            # Limpiar los nombres de las columnas
             df.columns = [str(c).lower().strip() for c in df.columns]
+
+            # 2. Convertimos el DataFrame a una lista de diccionarios para iterar de forma segura
+            records = df.to_dict('records')
 
             created_count = 0
             errors = []
             curp_pattern = r'^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2}$'
 
-            for index, row in df.iterrows():
+            for index, row in enumerate(records):
                 row_num = index + 2
                 try:
+                    # Función clean súper segura que neutraliza "NaT" o "NaN" ocultos como strings
                     def clean(val): 
-                        if pd.isna(val) or val is None or str(val).strip() == "": return None
+                        if pd.isna(val) or val is None or str(val).strip() == "" or str(val).strip().lower() in ['nan', 'nat']: 
+                            return None
                         return str(val).strip()
 
                     raw_curp = row.get('curp')
@@ -322,44 +332,47 @@ class ImportVolunteersView(APIView):
                             errors.append(f"Fila {row_num}: La CURP '{curp}' ya se encuentra registrada.")
                             continue
                     
-                    first_name = clean(row.get('nombre', row.get('first_name')))
-                    paternal = clean(row.get('apellido paterno', row.get('last_name_paternal')))
+                    first_name = clean(row.get('nombre')) or clean(row.get('first_name'))
+                    paternal = clean(row.get('apellido paterno')) or clean(row.get('last_name_paternal'))
                     
                     if not first_name or not paternal:
                         errors.append(f"Fila {row_num}: Faltan datos obligatorios (Nombre o Apellido Paterno).")
                         continue
 
-                    provided_code = clean(row.get('codigo', row.get('code')))
+                    provided_code = clean(row.get('codigo')) or clean(row.get('code'))
                     if provided_code:
                         if Volunteer.objects.filter(code=provided_code).exists():
                             errors.append(f"Fila {row_num}: El código '{provided_code}' ya existe.")
                             continue
 
-                    sex_val = clean(row.get('sexo', row.get('sex')))
+                    sex_val = clean(row.get('sexo')) or clean(row.get('sex'))
                     final_sex = None
                     if sex_val:
-                        val = sex_val.upper().strip()
-                        if val == 'M': final_sex = 'M'
-                        elif val == 'F': final_sex = 'F'
-                        elif val.startswith('H'): final_sex = 'M'
-                        elif 'MUJER' in val or 'FEM' in val: final_sex = 'F'
-                        elif val.startswith('M'): final_sex = 'M'
+                        val = sex_val.upper()
+                        if val in ['M', 'MASCULINO', 'H', 'HOMBRE']:
+                            final_sex = 'M'
+                        elif val in ['F', 'FEMENINO', 'MUJER']:
+                            final_sex = 'F'
 
+                    # Procesamiento seguro de fechas
                     birth_date = None
-                    raw_date = row.get('fecha nacimiento', row.get('fecha de nacimiento'))
-                    if raw_date:
+                    raw_date = row.get('fecha nacimiento') or row.get('fecha de nacimiento')
+                    
+                    if raw_date and pd.notnull(raw_date):
                         try:
+                            # Intentamos convertir lo que sea que venga en la celda a un objeto fecha de python
                             birth_date = pd.to_datetime(raw_date).date()
-                        except: pass
+                        except: 
+                            pass # Si falla, simplemente se queda como None
 
-                    phone = clean(row.get('telefono', row.get('phone'))) or ""
+                    phone = clean(row.get('telefono')) or clean(row.get('phone')) or ""
 
                     volunteer = Volunteer.objects.create(
                         code=provided_code,
                         first_name=first_name,
-                        middle_name=clean(row.get('segundo nombre', row.get('middle_name'))),
+                        middle_name=clean(row.get('segundo nombre')) or clean(row.get('middle_name')),
                         last_name_paternal=paternal,
-                        last_name_maternal=clean(row.get('apellido materno', row.get('last_name_maternal'))),
+                        last_name_maternal=clean(row.get('apellido materno')) or clean(row.get('last_name_maternal')),
                         phone=phone,
                         sex=final_sex,
                         curp=curp,
@@ -368,7 +381,7 @@ class ImportVolunteersView(APIView):
                     )
                     created_count += 1
 
-                    estudios_str = clean(row.get('estudios', row.get('studies')))
+                    estudios_str = clean(row.get('estudios')) or clean(row.get('studies'))
                     if estudios_str:
                         names = [s.strip() for s in estudios_str.split(',') if s.strip()]
                         for study_name in names:
