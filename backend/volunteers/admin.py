@@ -27,8 +27,8 @@ class VolunteerAdmin(admin.ModelAdmin):
     # Edición de participaciones dentro del voluntario
     inlines = [ParticipationInline]
 
-    # Campos de solo lectura (como el código autogenerado)
-    readonly_fields = ('code', 'created_at', 'updated_at')
+    # SE MODIFICÓ AQUÍ: Se eliminó 'code' para que el campo sea editable en el formulario
+    readonly_fields = ('created_at', 'updated_at')
 
     # Configuración del formulario de edición
     fieldsets = (
@@ -70,3 +70,16 @@ class VolunteerAdmin(admin.ModelAdmin):
             obj.get_manual_status_display()
         )
     manual_status_colored.short_description = "Estatus"
+
+    # SE AGREGÓ AQUÍ: Bloqueo del registro de historial nativo del Admin de Django
+    def log_addition(self, request, object, message):
+        """Sobrescribe el registro de creación para no dejar rastro en auditoría del admin."""
+        pass
+
+    def log_change(self, request, object, message):
+        """Sobrescribe el registro de modificación para no dejar rastro en auditoría del admin."""
+        pass
+
+    def log_deletion(self, request, object, object_repr):
+        """Sobrescribe el registro de eliminación para no dejar rastro en auditoría del admin."""
+        pass
