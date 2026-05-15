@@ -467,6 +467,23 @@ const AdminDashboard = () => {
       customSort: (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
     },
     { key: "user_name", label: "Usuario", sortable: true },
+
+    // --- NUEVA COLUMNA AGREGADA AQUÍ ---
+    {
+      key: "record_id",
+      label: "Registro Afectado",
+      sortable: true,
+      render: (r) =>
+        r.record_id ? (
+          <span className="font-bold text-gray-800 bg-gray-100 px-2 py-1 rounded">
+            {r.record_id}
+          </span>
+        ) : (
+          <span className="text-gray-400">-</span>
+        ),
+    },
+    // -----------------------------------
+
     {
       key: "action_display",
       label: "Acción",
