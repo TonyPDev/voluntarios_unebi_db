@@ -386,8 +386,9 @@ const VolunteerList = () => {
   useEffect(() => {
     fetchVolunteers(false);
     fetchStudies();
-    const intervalId = setInterval(() => fetchVolunteers(true), 5000);
-    return () => clearInterval(intervalId);
+
+    // ELIMINAMOS el setInterval para dejar de saturar la red.
+    // El sistema se actualizará automáticamente cuando crees, edites o cambies algo.
   }, [fetchVolunteers]);
 
   // --- FUNCIÓN DE VALIDACIÓN ---

@@ -29,7 +29,7 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.20.91']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.20.177']
 
 
 # Application definition
@@ -81,10 +81,10 @@ SIMPLE_JWT = {
 # Configuración CORS (Para permitir conexión con React)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://192.168.20.91:5173", 
+    "http://192.168.20.177:5173", 
 ]
 
-CSRF_TRUSTED_ORIGINS = ['http://192.168.20.91']
+CSRF_TRUSTED_ORIGINS = ['http://192.168.20.177']
 
 
 ROOT_URLCONF = 'core.urls'
