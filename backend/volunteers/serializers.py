@@ -69,7 +69,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
                 return "En espera (Descanso)"
             
             # SI PASARON LOS 3 MESES:
-            elif obj.manual_status != 'rejected':
+            elif obj.manual_status != 'rejected' and obj.manual_status != 'eligible': 
                 return "Reevaluación" # ANTES ERA APTO
         
         # 4. Fallback Manual
@@ -132,3 +132,4 @@ class VolunteerSerializer(serializers.ModelSerializer):
             )
 
         return super().update(instance, validated_data)
+    

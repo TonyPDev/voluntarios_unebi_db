@@ -24,6 +24,7 @@ const VolunteerForm = ({
     setValue,
     watch,
     control,
+    reset, // <-- AGREGA ESTO AQUÍ
     formState: { errors },
   } = useForm();
 
@@ -58,7 +59,21 @@ const VolunteerForm = ({
       .get(`volunteers/${idToEdit}/`)
       .then((res) => {
         const data = res.data;
-        Object.keys(data).forEach((key) => setValue(key, data[key]));
+
+        // 1. Convertimos la fecha a un objeto Date real para que el calendario no se rompa
+        if (data.birth_date && typeof data.birth_date === "string") {
+          const [year, month, day] = data.birth_date.split("-");
+          data.birth_date = new Date(year, month - 1, day);
+        }
+
+        // 2. Limpiamos cualquier dato falso
+        if (data.contacted === "false" || data.contacted === false) {
+          data.contacted = "not_contacted";
+        }
+
+        // 3. Llenamos TODO el formulario de golpe y de forma segura
+        reset(data);
+
         setParticipations(data.participations || []);
         setCurrentStatus(data.status);
       })
@@ -70,9 +85,16 @@ const VolunteerForm = ({
     setServerError("");
     const payload = { ...data };
 
+    // --- 1. AGREGA ESTA VALIDACIÓN PARA LIMPIAR LA FECHA ANTES DE ENVIARLA ---
+    if (payload.birth_date instanceof Date) {
+      const year = payload.birth_date.getFullYear();
+      const month = String(payload.birth_date.getMonth() + 1).padStart(2, "0");
+      const day = String(payload.birth_date.getDate()).padStart(2, "0");
+      payload.birth_date = `${year}-${month}-${day}`;
+    }
+    // ------------------------------------------------------------------------
+
     // --- CORRECCIÓN DEL ERROR "false is not a valid choice" ---
-    // Si el registro tiene un valor antiguo ("false" o false) en 'contacted',
-    // lo convertimos a 'not_contacted' antes de enviarlo para que pase la validación.
     if (payload.contacted === "false" || payload.contacted === false) {
       payload.contacted = "not_contacted";
     }
@@ -92,15 +114,6 @@ const VolunteerForm = ({
         setServerError("Debes escribir las observaciones del rechazo.");
         return;
       }
-    }
-
-    // VALIDACIÓN PARA APTOS (Solo observaciones si quieren, no obligatorio, pero justificación sí)
-    if (
-      payload.manual_status === "eligible" &&
-      !payload.justification &&
-      isEditing
-    ) {
-      // La justificación es validada por el backend, pero buena práctica checar aquí
     }
 
     try {

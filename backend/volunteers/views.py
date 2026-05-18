@@ -20,7 +20,9 @@ from .serializers import VolunteerSerializer, ParticipationSerializer
 from .permissions import IsAdminOrReadOnly
 
 class VolunteerViewSet(viewsets.ModelViewSet):
-    queryset = Volunteer.objects.all().order_by('-created_at')
+    # LA SOLUCIÓN AL N+1: Cargamos todos los estudios de golpe en 1 sola consulta
+    queryset = Volunteer.objects.prefetch_related('participations__study').all().order_by('-created_at')
+    
     serializer_class = VolunteerSerializer
     permission_classes = [IsAdminOrReadOnly]
     
@@ -28,32 +30,32 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     search_fields = ['first_name', 'last_name_paternal', 'last_name_maternal', 'code', 'curp']
     ordering_fields = ['created_at', 'birth_date', 'code']
 
-    # --- MÉTODO AUXILIAR PARA CALCULAR ESTATUS (Debe coincidir con Serializer) ---
     def calculate_status(self, volunteer):
         today = date.today()
+        # Convertimos a lista en memoria para NO hacer más consultas lentas a la base de datos
+        participations = list(volunteer.participations.all())
         
-        # 1. En estudio activo
-        active_part = volunteer.participations.filter(study__is_active=True).first()
+        active_part = next((p for p in participations if p.study.is_active), None)
         if active_part:
             if volunteer.manual_status == 'in_study':
                 return "En estudio"
             else:
                 return "Estudio asignado"
         
-        # 2. Edad
         if volunteer.age and volunteer.age > 55:
             return "No elegible por edad"
 
-        # 3. Periodo de Lavado
-        last_paid = volunteer.participations.filter(study__payment_date__isnull=False).order_by('-study__payment_date').first()
-        if last_paid:
+        paid_parts = [p for p in participations if p.study.payment_date]
+        if paid_parts:
+            paid_parts.sort(key=lambda p: p.study.payment_date, reverse=True)
+            last_paid = paid_parts[0]
             three_months_later = last_paid.study.payment_date + timedelta(days=90)
+            
             if today < three_months_later:
                 return "En espera (Descanso)"
-            elif volunteer.manual_status != 'rejected':
+            elif volunteer.manual_status != 'rejected' and volunteer.manual_status != 'eligible':
                 return "Reevaluación"
         
-        # 4. Fallback Manual
         status_map = {
             'waiting_approval': 'En espera por aprobación',
             'eligible': 'Apto',
